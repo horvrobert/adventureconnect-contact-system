@@ -19,6 +19,10 @@ A serverless contact form system built on AWS using Infrastructure as Code (Terr
 
 ## Architecture
 
+### Architecture Diagram
+
+![Architecture Diagram](diagrams/architecture-sprint1.png)
+
 ### Current Components
 
 ```
@@ -168,9 +172,9 @@ Should return the test submission with generated `submissionId`.
 
 Current infrastructure costs (monthly, low traffic):
 
-- **DynamoDB**: ~$0.25 (100 writes/day)
-- **Lambda**: ~$0.20 (100 invocations/day, 260ms avg duration)
-- **Total**: ~$0.45/month
+- **DynamoDB**: ~0.23€ (100 writes/day)
+- **Lambda**: ~0.18€ (100 invocations/day, 260ms avg duration)
+- **Total**: ~0.41€/month
 
 Assumes AWS Free Tier. Production costs scale with usage.
 
