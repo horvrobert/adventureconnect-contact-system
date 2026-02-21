@@ -24,8 +24,8 @@ lambda/__pycache__/
 *.swp
 
 # My .md files
-decisions.md
-tshoot.md
-testing-log.md
 errors.md
 screenshots/
+learning.md
+
+
