@@ -4,59 +4,69 @@ A serverless contact form system built on AWS using Infrastructure as Code (Terr
 
 ## Project Status
 
-**Current Phase:** Backend Infrastructure (Sprint 1 Complete ✅)
+**Current Phase:** API Integration (Sprint 2 Complete ✅)
 
 **Completed:**
-- DynamoDB table for contact submissions
-- Lambda function for processing form data
-- IAM roles and policies with least-privilege permissions
+- ✅ Sprint 1: Lambda + DynamoDB backend
+- ✅ Sprint 2: API Gateway + CORS + Rate Limiting
 
 **Next:**
-- API Gateway for HTTPS endpoints
 - SES email notifications
 - S3 static website hosting
 - CloudWatch monitoring and alerting
 
+**Note:** Infrastructure is deployed during active development sprints, then destroyed to minimize costs. All code is version-controlled and can be redeployed via Terraform in ~2 minutes.
+
 ## Architecture
 
-### Architecture Diagram
+### Sprint 1: Serverless Backend
 
-![Architecture Diagram](diagrams/architecture-sprint1.png)
+![Sprint 1 Architecture](diagrams/architecture-sprint1.png)
 
-### Current Components
+**Components:**
+- Lambda function (Python 3.11) processes submissions
+- DynamoDB stores data with PAY_PER_REQUEST billing
+- IAM roles with scoped permissions (table ARN, not wildcard)
+- CloudWatch logs for monitoring
+
+**Key Learning:** Lambda cold starts (860ms) vs warm starts (260ms)
+
+### Sprint 2: API Gateway Integration
+
+![Sprint 2 Architecture](diagrams/architecture-sprint2.png)
+
+**Components:**
+- API Gateway REST API provides public HTTPS endpoint
+- CORS enabled for browser cross-origin requests
+- Rate limiting: 1000 requests/day, 5 req/sec, burst 10
+- Lambda permission grants API Gateway invocation access
+
+**Key Learning:** Two permission systems - IAM Role (what Lambda can access) vs Lambda Permission (who can invoke Lambda)
+
+## API Endpoint
+
+After deployment via Terraform, the API endpoint follows this format:
 
 ```
-┌─────────────────┐
-│  Lambda Function│
-│  (Python 3.11)  │
-│  - 128MB memory │
-│  - 10s timeout  │
-└────────┬────────┘
-         │
-         │ PutItem/GetItem
-         │ (scoped permissions)
-         ▼
-┌─────────────────┐
-│  DynamoDB Table │
-│  - PAY_PER_REQ  │
-│  - submissionId │
-└─────────────────┘
+https://{api-id}.execute-api.eu-central-1.amazonaws.com/prod/submit
 ```
 
-**Key Design Decisions:**
+**Example request:**
+```bash
+curl -X POST https://abc123xyz.execute-api.eu-central-1.amazonaws.com/prod/submit \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test User","email":"test@example.com","message":"Hello"}'
+```
 
-- **DynamoDB PAY_PER_REQUEST billing**: Auto-scales without capacity planning, ideal for unpredictable contact form traffic
-- **Scoped IAM permissions**: Lambda can only PutItem/GetItem on this specific table (not `"*"`)
-- **Environment variables**: Table name injected at runtime, no hardcoded values
-- **UUID partition key**: Ensures unique identification even with duplicate submissions
+**Example response:**
+```json
+{
+  "message": "Submission received",
+  "submissionId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
 
-### Performance Characteristics
-
-**Cold Start Performance:**
-- First invocation: ~860ms (602ms container init + 260ms execution)
-- Warm invocations: ~260ms (container reused)
-
-For a contact form, this latency is acceptable. For high-frequency APIs, provisioned concurrency would be considered.
+**Security:** Rate limiting configured (1000 req/day max) to prevent abuse and cap costs at 0.12€ per month worst case.
 
 ## Project Structure
 
@@ -66,11 +76,17 @@ For a contact form, this latency is acceptable. For high-frequency APIs, provisi
 │   ├── provider.tf          # AWS provider configuration
 │   ├── dynamodb.tf          # DynamoDB table definition
 │   ├── iam.tf               # IAM roles and policies
-│   └── lambda.tf            # Lambda function configuration
+│   ├── lambda.tf            # Lambda function configuration
+│   └── api_gateway.tf       # API Gateway REST API + CORS + rate limiting
 ├── lambda/
 │   └── lambda_function.py   # Python handler for form processing
+├── diagrams/
+│   ├── architecture-sprint1.png  # Sprint 1 architecture
+│   └── architecture-sprint2.png  # Sprint 2 architecture
 ├── decisions.md             # Architectural decisions and trade-offs
-├── tshoot.md               # Troubleshooting guides
+├── errors.md                # Issues encountered and fixes
+├── testing-log.md           # Test results and verification
+├── tshoot.md                # Troubleshooting guides
 └── README.md
 ```
 
@@ -123,20 +139,29 @@ aws iam list-attached-role-policies --role-name adventureconnect-lambda-role
 
 ## Testing
 
-### Manual Lambda Test (AWS Console)
+### API Gateway Endpoint Test
 
-1. Navigate to Lambda → Functions → `adventureconnect-contact-handler`
-2. Click "Test" tab
-3. Create test event with:
+```bash
+# Test POST request
+curl -X POST https://YOUR-API-ID.execute-api.eu-central-1.amazonaws.com/prod/submit \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Test User","email":"test@example.com","message":"Test submission"}'
 
-```json
-{
-  "body": "{\"name\":\"Test User\",\"email\":\"test@example.com\",\"message\":\"Test submission\"}"
-}
+# Expected response
+{"message":"Submission received","submissionId":"uuid-here"}
 ```
 
-4. Click "Test"
-5. Verify response shows `statusCode: 200`
+### CORS Preflight Test
+
+```bash
+# Test OPTIONS request
+curl -X OPTIONS https://YOUR-API-ID.execute-api.eu-central-1.amazonaws.com/prod/submit -v
+
+# Should see headers:
+# access-control-allow-origin: *
+# access-control-allow-methods: POST,OPTIONS
+# access-control-allow-headers: Content-Type,...
+```
 
 ### Verify DynamoDB Entry
 
@@ -144,50 +169,76 @@ aws iam list-attached-role-policies --role-name adventureconnect-lambda-role
 aws dynamodb scan --table-name adventureconnect-submissions --region eu-central-1
 ```
 
-Should return the test submission with generated `submissionId`.
+### Check CloudWatch Logs
+
+```bash
+aws logs tail /aws/lambda/adventureconnect-contact-handler --follow --region eu-central-1
+```
 
 ## Key Learnings
 
-### Infrastructure as Code
+### Sprint 1: Serverless Backend
+
+**Infrastructure as Code:**
 - Terraform manages all AWS resources declaratively
 - State tracking enables safe infrastructure changes
 - Resource dependencies handled automatically
 
-### Serverless Architecture
-- No server management or provisioning required
-- Auto-scaling based on demand
-- Pay-per-use pricing model
-
-### IAM Security
+**IAM Security:**
 - Principle of least privilege applied throughout
-- Resource-scoped permissions (not wildcard `"*"`)
+- Resource-scoped permissions (table ARN, not wildcard `"*"`)
 - Trust policies control service-to-service access
 
-### DynamoDB Design
-- Partition key selection impacts query patterns
+**DynamoDB Design:**
+- Partition key selection (UUID ensures uniqueness)
 - PAY_PER_REQUEST vs PROVISIONED capacity trade-offs
-- Schema flexibility for evolving requirements
+- Auto-scaling without capacity planning
+
+### Sprint 2: API Gateway Integration
+
+**Two Permission Systems:**
+- IAM Role: What Lambda can ACCESS (DynamoDB, CloudWatch)
+- Lambda Permission: WHO can INVOKE Lambda (API Gateway, EventBridge, S3)
+- Removing Lambda permission → 500 error, no CloudWatch logs (Lambda never invoked)
+
+**CORS Configuration:**
+- OPTIONS method with MOCK integration (no Lambda call, ~10ms response)
+- Browser preflight requests require proper headers
+- `Access-Control-Allow-Origin: *` enables cross-origin requests
+
+**Rate Limiting:**
+- Usage plans protect against abuse and runaway costs
+- 1000 req/day limit caps worst-case monthly cost at 0.12€
+- Requests exceeding limit get HTTP 429 (Too Many Requests)
 
 ## Cost Estimation
 
-Current infrastructure costs (monthly, low traffic):
+**Sprint 1 + 2 Combined (100 submissions/day):**
 
-- **DynamoDB**: ~0.23€ (100 writes/day)
-- **Lambda**: ~0.18€ (100 invocations/day, 260ms avg duration)
-- **Total**: ~0.41€/month
+| Service | Usage | Monthly Cost |
+|---------|-------|--------------|
+| API Gateway | 3,000 requests | 0.009€ |
+| Lambda | 3,000 invocations | 0€ (free tier) |
+| DynamoDB | 3,000 writes | 0.003€ |
+| **Total** | | **~0.012€** |
 
-Assumes AWS Free Tier. Production costs scale with usage.
+**With rate limiting at max (1000 req/day):**
+- API Gateway: 0.09€
+- Lambda: 0€ (free tier)
+- DynamoDB: 0.03€
+- **Total: ~0.12€ per month**
+
+**All costs calculated in Euro (€) using 1 USD = 0.86 EUR**
 
 ## Roadmap
 
-- [ ] API Gateway REST API endpoint
-- [ ] SES email notifications (customer + business)
-- [ ] S3 static website hosting
-- [ ] CloudFront distribution (optional)
-- [ ] CloudWatch dashboards and alarms
-- [ ] Comprehensive documentation with architecture diagrams
+- [x] Sprint 1: Lambda + DynamoDB backend
+- [x] Sprint 2: API Gateway + CORS + Rate Limiting
+- [ ] Sprint 3: SES email notifications
+- [ ] Sprint 4: S3 static website frontend
+- [ ] Sprint 5: CloudWatch monitoring and alerts
 
 ## Documentation
 
 - **decisions.md**: Architectural decisions, alternatives considered, trade-offs
-- **tshoot.md**: Troubleshooting guides for common issues
+- **testing-log.md**: Test results, inputs, outputs, execution metrics
