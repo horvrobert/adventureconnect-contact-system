@@ -71,3 +71,86 @@ Why rejected:
 Trade-offs accepted:
 - Lambda can run up to 10 seconds before timing out (could waste compute time if something hangs)
 - For contact form, acceptable trade-off for reliability
+
+
+
+## Decision: API Gateway REST API (not HTTP API)
+
+Why this exists:
+- Need public HTTPS endpoint to expose Lambda function to frontend
+- REST API provides production-grade features (request validation, usage plans, detailed metrics)
+- Industry standard for enterprise serverless architectures
+
+Alternatives considered:
+- HTTP API (simpler, 70% cheaper)
+- Lambda Function URLs (free, simplest)
+
+Why rejected:
+- HTTP API: Fewer features, less common in enterprise environments, limited request validation
+- Function URLs: No request throttling, no usage plans, no API keys, harder to add authentication later
+
+Trade-offs accepted:
+- Higher cost ($3.50 vs $1.00 per million requests for HTTP API)
+- More complex Terraform configuration
+- Slightly higher latency (~10-20ms)
+- For learning project targeting enterprise role: production patterns > cost optimization
+- At contact form scale (100 requests/day): cost difference is ~0.008 € per month (negligible)
+
+When to reconsider:
+- If building high-volume public API where cost matters (>10M requests/month)
+- If only need simple Lambda proxy with no advanced features
+- If optimizing for lowest latency (HTTP API is ~10ms faster)
+
+
+## Decision: Lambda Permission for API Gateway Invocation
+
+Why this exists:
+- API Gateway needs explicit permission to invoke Lambda function
+- Lambda's IAM role controls what Lambda can do (outbound permissions)
+- Lambda permissions control who can invoke Lambda (inbound permissions)
+
+How it works:
+- Resource-based policy attached to Lambda function itself
+- Grants apigateway.amazonaws.com service permission to invoke
+- Uses source_arn to restrict which API Gateway can invoke (not any random API)
+
+Without this:
+- API Gateway receives requests from users
+- Attempts to invoke Lambda
+- Gets Access Denied error (403)
+- Users see "Internal Server Error"
+
+Security consideration:
+- source_arn restricts invocation to specific API Gateway (not all APIs in account)
+- Format: arn:aws:execute-api:REGION:ACCOUNT:API_ID/*/* (any stage, any method)
+
+
+## Decision: API Gateway REST API (not HTTP API)
+
+**Why this exists:**
+Need public HTTPS endpoint to expose Lambda function to frontend. REST API provides production-grade features over simpler HTTP API.
+
+**Alternatives considered:**
+- HTTP API (simpler, 70% cheaper: 0.86 € vs 3.01 € per million requests)
+- Lambda Function URLs (free, direct invocation)
+
+**Why rejected:**
+- HTTP API: Fewer features (no request validation, no usage plans, limited monitoring)
+- Function URLs: No throttling, no API keys, harder to add authentication later, no usage analytics
+
+**Trade-offs accepted:**
+- Higher cost: 3.01 € per million requests vs 0.86 € for HTTP API
+- More complex Terraform configuration (9 resources vs 3 for HTTP API)
+- Slightly higher latency (~10-20ms overhead from additional features)
+
+**Why acceptable:**
+- At contact form scale (100 requests/day), cost difference is ~0.008 € per month (negligible)
+- Learning production patterns matters more than cost optimization for portfolio project
+- Enterprise employers expect REST API experience
+- Usage plans enable rate limiting for cost protection (1000 req/day max = 0.09 € monthly worst case)
+
+**When to reconsider:**
+- High-volume public API (>10M requests/month) where cost matters
+- Simple Lambda proxy with no need for request validation or usage plans
+- Optimizing for lowest possible latency (HTTP API is ~10ms faster)
+```
