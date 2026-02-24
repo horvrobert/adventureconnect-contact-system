@@ -121,3 +121,123 @@ Without this:
 Security consideration:
 - source_arn restricts invocation to specific API Gateway, not all APIs in account
 - Format: arn:aws:execute-api:REGION:ACCOUNT:API_ID/*/* (any stage, any method)
+
+---
+
+## Decision: SES integration architecture — asynchronous via DynamoDB Streams
+
+Why this exists:
+- Contact form submissions need to trigger email notifications via SES
+- Two viable patterns: call SES directly inside existing Lambda, or trigger a separate Lambda via DynamoDB Streams
+
+Alternatives considered:
+- Synchronous: call ses.send_email() inside existing contact form Lambda after DynamoDB write
+
+Why synchronous rejected:
+- SES failure or timeout causes API to return 500 even if form data was saved successfully
+- Increases API response latency by SES call duration (~200-500ms)
+- Blast radius: SES outage breaks the entire form submission flow
+- Violates single responsibility principle — one Lambda doing two unrelated jobs
+
+Why asynchronous chosen:
+- Form submission succeeds independently of email delivery
+- SES failures do not affect user-facing API response or form data persistence
+- DynamoDB Streams provide automatic retry on notification Lambda failure
+- IAM blast radius contained: SES permissions isolated to notification Lambda only
+- Decoupled components are easier to debug, test, and replace independently
+
+Trade-offs accepted:
+- Higher complexity: additional Lambda, IAM role, DynamoDB Stream, and event source mapping
+- Email delivery is eventually consistent — arrives seconds after form submission, not instantly
+- More Terraform resources to manage
+- For contact form use case: acceptable, form data persistence matters more than immediate email delivery
+
+When to reconsider:
+- If email delivery must be confirmed synchronously before returning success to user
+- If DynamoDB Streams cost becomes a concern at high volume
+
+---
+
+## Decision: SES sandbox mode — verified identities only
+
+Why this exists:
+- AWS SES accounts start in sandbox mode in all regions, including eu-central-1
+- Sandbox restricts sending to verified email addresses only
+- Cannot send to arbitrary user-submitted email addresses
+
+Current configuration:
+- Sender: [EMAIL_ADDRESS] (verified SES identity)
+- Recipient: [EMAIL_ADDRESS] (verified SES identity)
+- Notification emails hardcoded to go to verified recipient, not user-submitted address
+
+Production path:
+- Submit AWS SES production access request via support ticket
+- Provide use case: transactional contact form notifications
+- Once approved, send to unverified addresses (actual user emails)
+- Update Lambda to send confirmation to user-submitted address
+
+Why programmatic verification of arbitrary addresses is not possible:
+- Verification requires recipient to click a confirmation link — human-in-the-loop by design
+- Prevents SES from being used as open relay for spam
+- AWS enforces this at service level, cannot be bypassed in code
+
+Trade-offs accepted:
+- In current state, users do not receive confirmation emails — only site owner is notified
+- Acceptable for portfolio/learning project demonstrating the architecture
+- Production readiness is one AWS support request away from full functionality
+
+Why SES resource is set to * in IAM policy:
+- AWS does not support resource-level restrictions for "ses:SendEmail"
+- There is no ARN format for "ses:SendEmail"
+- Trying to put an ARN there, the policy would either error or silently fail to grant access
+- This is an AWS service limitation, not a security flaw. It's documented in the SES IAM guide. In practice you compensate with other controls — verified identities, sending limits, and CloudWatch alerts on unexpected sending volume.
+- 
+---
+
+
+## Decision: DynamoDB Streams view type — NEW_IMAGE only
+
+Why this exists:
+- Notification Lambda needs to read submitted form data to build email body
+- DynamoDB Streams offers four view types: KEYS_ONLY, NEW_IMAGE, OLD_IMAGE, NEW_AND_OLD_IMAGES
+
+Alternatives considered:
+- KEYS_ONLY: records only the partition key of the changed item
+- NEW_AND_OLD_IMAGES: records both the item before and after the change
+- OLD_IMAGE: records only the item state before the change
+
+Why rejected:
+- KEYS_ONLY: would require a secondary GetItem call back to DynamoDB to fetch name, email, message — extra network call, extra IAM permission, extra latency, unnecessary complexity
+- NEW_AND_OLD_IMAGES: doubles record size and cost, old state is irrelevant for sending a notification email
+- OLD_IMAGE: useless for INSERT events, no previous state exists
+
+Why NEW_IMAGE chosen:
+- Contains the full item as it was written — name, email, message, timestamp all available immediately
+- No secondary DynamoDB call needed, notification Lambda stays stateless and simple
+- Minimal data, minimal cost
+
+Trade-offs accepted:
+- If notification logic ever needs to detect what changed between writes, NEW_IMAGE alone is insufficient
+- Acceptable for contact form use case where only INSERTs are relevant
+
+---
+
+## Decision: DynamoDB typed attribute format — explicit type unwrapping in Lambda
+
+Why this exists:
+- DynamoDB Streams deliver item data in DynamoDB's native typed format, not plain JSON
+- Every attribute value is wrapped: { "S": "Robert" } not "Robert"
+- Type codes: S (String), N (Number), B (Binary), BOOL (Boolean), NULL (Null), M (Map), L (List), SS (String Set), NS (Number Set), BS (Binary Set)
+
+Why it matters:
+- Lambda code must unwrap explicitly: record["dynamodb"]["NewImage"]["email"]["S"]
+- Accessing record["dynamodb"]["NewImage"]["email"] returns {"S": "robert@gmail.com"} — not the value
+- Failure to unwrap produces malformed email bodies and subtle bugs
+
+How we handle it:
+- Notification Lambda accesses each field with explicit type key ["S"]
+- Only String type needed for contact form fields: name, email, message, timestamp
+
+Related:
+- DynamoDB is schema-flexible — type wrappers allow mixed item types in one table without fixed schema
+- This format appears in all Stream records regardless of view type chosen
