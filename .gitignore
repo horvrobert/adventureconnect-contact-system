@@ -2,6 +2,7 @@
 *.tfstate
 *.tfstate.*
 *.tfstate.backup
+*.tfvars
 .terraform/
 .terraform.lock.hcl
 crash.log
@@ -22,10 +23,5 @@ lambda/__pycache__/
 .vscode/
 .idea/
 *.swp
-
-# My .md files
-errors.md
-screenshots/
-learning.md
 
 
