@@ -1,0 +1,202 @@
+{
+  "info": {
+    "_postman_id": "1c216caf-19dd-48e9-97a3-0b556a56cfcf",
+    "name": "AdventureConnect",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "6557162"
+  },
+  "item": [
+    {
+      "name": "Submit Contact Form",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Robert Test\",\n  \"email\": \"robert@test.com\",\n  \"message\": \"Testing via Postman\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://b8kceclkw4.execute-api.eu-central-1.amazonaws.com/prod/submit",
+          "protocol": "https",
+          "host": [
+            "b8kceclkw4",
+            "execute-api",
+            "eu-central-1",
+            "amazonaws",
+            "com"
+          ],
+          "path": [
+            "prod",
+            "submit"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "Submit Contact Form",
+          "originalRequest": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Robert Test\",\n  \"email\": \"robert@test.com\",\n  \"message\": \"Testing via Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "https://b8kceclkw4.execute-api.eu-central-1.amazonaws.com/prod/submit",
+              "protocol": "https",
+              "host": [
+                "b8kceclkw4",
+                "execute-api",
+                "eu-central-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "prod",
+                "submit"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": ":status",
+              "value": 200
+            },
+            {
+              "key": "date",
+              "value": "Tue, 24 Feb 2026 09:59:43 GMT"
+            },
+            {
+              "key": "content-type",
+              "value": "application/json"
+            },
+            {
+              "key": "content-length",
+              "value": "90"
+            },
+            {
+              "key": "x-amzn-requestid",
+              "value": "fcb960e0-57d2-46d4-b88b-4807092985d8"
+            },
+            {
+              "key": "access-control-allow-origin",
+              "value": "*"
+            },
+            {
+              "key": "x-amz-apigw-id",
+              "value": "ZR92UGr-FiAERIQ="
+            },
+            {
+              "key": "x-amzn-trace-id",
+              "value": "Root=1-699d768e-02e16aea4cb7ed3a0022ab9c;Parent=0bf5d4d4c4596522;Sampled=0;Lineage=1:727fab2b:0"
+            }
+          ],
+          "cookie": [],
+          "body": "{\n    \"message\": \"Submission received\",\n    \"submissionId\": \"bf2d88f7-9a77-454d-a230-3e053c2ca56f\"\n}"
+        }
+      ]
+    },
+    {
+      "name": "CORS preflight",
+      "request": {
+        "method": "OPTIONS",
+        "header": [],
+        "url": {
+          "raw": "https://b8kceclkw4.execute-api.eu-central-1.amazonaws.com/prod/submit",
+          "protocol": "https",
+          "host": [
+            "b8kceclkw4",
+            "execute-api",
+            "eu-central-1",
+            "amazonaws",
+            "com"
+          ],
+          "path": [
+            "prod",
+            "submit"
+          ]
+        }
+      },
+      "response": [
+        {
+          "name": "CORS preflight",
+          "originalRequest": {
+            "method": "OPTIONS",
+            "header": [],
+            "url": {
+              "raw": "https://b8kceclkw4.execute-api.eu-central-1.amazonaws.com/prod/submit",
+              "protocol": "https",
+              "host": [
+                "b8kceclkw4",
+                "execute-api",
+                "eu-central-1",
+                "amazonaws",
+                "com"
+              ],
+              "path": [
+                "prod",
+                "submit"
+              ]
+            }
+          },
+          "status": "OK",
+          "code": 200,
+          "_postman_previewlanguage": null,
+          "header": [
+            {
+              "key": ":status",
+              "value": 200
+            },
+            {
+              "key": "date",
+              "value": "Tue, 24 Feb 2026 10:00:31 GMT"
+            },
+            {
+              "key": "content-type",
+              "value": "application/json"
+            },
+            {
+              "key": "content-length",
+              "value": "0"
+            },
+            {
+              "key": "x-amzn-requestid",
+              "value": "cadf2b24-f7c6-4378-8b54-9fc87f0563b0"
+            },
+            {
+              "key": "access-control-allow-origin",
+              "value": "*"
+            },
+            {
+              "key": "access-control-allow-headers",
+              "value": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token"
+            },
+            {
+              "key": "x-amz-apigw-id",
+              "value": "ZR995F48FiAEF4Q="
+            },
+            {
+              "key": "access-control-allow-methods",
+              "value": "POST,OPTIONS"
+            }
+          ],
+          "cookie": [],
+          "body": null
+        }
+      ]
+    }
+  ]
+}
