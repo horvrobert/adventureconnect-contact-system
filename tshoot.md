@@ -26,7 +26,6 @@
 - Missing PutItem action
 - Lambda not using intended role
 
-
 ---
 
 ## Troubleshooting Guide: API Gateway Returns 403/500
@@ -39,31 +38,31 @@
 
 1. Check if Lambda permission exists:
 ```bash
-   aws lambda get-policy --function-name adventureconnect-contact-handler
+aws lambda get-policy --function-name adventureconnect-contact-handler
 ```
-   Look for statement allowing `apigateway.amazonaws.com`
+Look for statement allowing `apigateway.amazonaws.com`
 
 2. Verify in Terraform:
 ```bash
-   grep -r "aws_lambda_permission" terraform/
+grep -r "aws_lambda_permission" terraform/
 ```
-   Should see `api_gateway_lambda_permission` resource
+Should see `api_gateway_lambda_permission` resource
 
 3. Check source ARN in permission matches your API:
 ```bash
-   aws apigateway get-rest-apis --query 'items[?name==`adventureconnect-api`].id'
+aws apigateway get-rest-apis --query 'items[?name==`adventureconnect-api`].id'
 ```
-   Permission source ARN should reference this API ID
+Permission source ARN should reference this API ID
 
 4. If missing, add `aws_lambda_permission` and apply:
 ```hcl
-   resource "aws_lambda_permission" "api_gateway_lambda_permission" {
-     statement_id  = "AllowAPIGatewayInvoke"
-     action        = "lambda:InvokeFunction"
-     function_name = aws_lambda_function.lambda_function.function_name
-     principal     = "apigateway.amazonaws.com"
-     source_arn    = "${aws_api_gateway_rest_api.contact_form_api.execution_arn}/*/*"
-   }
+resource "aws_lambda_permission" "api_gateway_lambda_permission" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.lambda_function.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_api_gateway_rest_api.contact_form_api.execution_arn}/*/*"
+}
 ```
 
 **Common causes:**
@@ -82,37 +81,29 @@
 
 1. Check if OPTIONS method exists:
 ```bash
-   aws apigateway get-method \
-     --rest-api-id YOUR_API_ID \
-     --resource-id YOUR_RESOURCE_ID \
-     --http-method OPTIONS \
-     --region eu-central-1
+aws apigateway get-method \
+  --rest-api-id YOUR_API_ID \
+  --resource-id YOUR_RESOURCE_ID \
+  --http-method OPTIONS \
+  --region eu-central-1
 ```
 
 2. Verify OPTIONS integration response has CORS headers:
 ```bash
-   aws apigateway get-integration-response \
-     --rest-api-id YOUR_API_ID \
-     --resource-id YOUR_RESOURCE_ID \
-     --http-method OPTIONS \
-     --status-code 200 \
-     --region eu-central-1
+aws apigateway get-integration-response \
+  --rest-api-id YOUR_API_ID \
+  --resource-id YOUR_RESOURCE_ID \
+  --http-method OPTIONS \
+  --status-code 200 \
+  --region eu-central-1
 ```
-   Should show `Access-Control-Allow-Origin` in response parameters
+Should show `Access-Control-Allow-Origin` in response parameters
 
 3. Test OPTIONS manually:
 ```bash
-   curl -X OPTIONS https://YOUR_API_URL/prod/submit -v
+curl -X OPTIONS https://YOUR_API_URL/prod/submit -v
 ```
-   Look for `access-control-allow-origin: *` in headers
-
-4. Check API Gateway deployment includes CORS configuration:
-```bash
-   aws apigateway get-stage \
-     --rest-api-id YOUR_API_ID \
-     --stage-name prod \
-     --region eu-central-1
-```
+Look for `access-control-allow-origin: *` in headers
 
 **Common causes:**
 - OPTIONS method not deployed (forgot `terraform apply`)
@@ -130,16 +121,16 @@
 
 1. Check current usage plan limits:
 ```bash
-   aws apigateway get-usage-plans --region eu-central-1
+aws apigateway get-usage-plans --region eu-central-1
 ```
 
 2. Check actual usage:
 ```bash
-   aws apigateway get-usage \
-     --usage-plan-id YOUR_PLAN_ID \
-     --start-date 2026-02-21 \
-     --end-date 2026-02-21 \
-     --region eu-central-1
+aws apigateway get-usage \
+  --usage-plan-id YOUR_PLAN_ID \
+  --start-date 2026-02-21 \
+  --end-date 2026-02-21 \
+  --region eu-central-1
 ```
 
 **Expected behavior:** This is working as designed (cost protection)
@@ -147,3 +138,59 @@
 **To increase limits temporarily:**
 - Update `quota_settings.limit` in `api_gateway.tf`
 - Run `terraform apply`
+
+---
+
+## Troubleshooting Guide: SES Email Notifications Not Delivered
+
+**Symptom:** Form submission succeeds (200 response) but no email arrives
+
+**Step 1 — Check if notification Lambda was invoked at all:**
+```bash
+aws logs tail /aws/lambda/adventureconnect-notification-handler --follow --region eu-central-1
+```
+
+**No log group exists:**
+- Lambda was never triggered
+- Check event source mapping: `aws lambda list-event-source-mappings --function-name adventureconnect-notification-handler --region eu-central-1`
+- Verify DynamoDB Stream is enabled: `aws dynamodb describe-table --table-name adventureconnect-submissions --region eu-central-1 | grep StreamSpecification`
+- Check event source mapping state — should be `Enabled`
+
+**Log group exists, shows `Skipping event: MODIFY`:**
+- Stream is working but record came through as MODIFY not INSERT
+- This can happen if the item already existed and was updated
+- Submit a completely new form submission
+
+**Log group exists, shows `Illegal address` or SES error:**
+- Check environment variables in Lambda console
+- AWS Console → Lambda → adventureconnect-notification-handler → Configuration → Environment variables
+- Verify SENDER_EMAIL and RECIPIENT_EMAIL contain real addresses, not placeholders
+- Verify both addresses are verified in SES: AWS Console → SES → Verified Identities
+
+**Log group exists, shows `AccessDenied` for SES:**
+- Notification Lambda IAM role missing SES policy
+- Check: `aws iam list-attached-role-policies --role-name adventureconnect-notification-lambda-role`
+- Should show `adventureconnect-notification-ses-policy` attached
+- If missing, verify `notification_iam.tf` has the policy attachment resource and run `terraform apply`
+
+**Log group shows success but email not in inbox:**
+- Check spam/junk folder
+- Verify recipient address is verified in SES sandbox
+- SES sandbox only delivers to verified addresses — unverified recipients are silently rejected
+
+**Step 2 — Verify Stream configuration:**
+```bash
+aws dynamodb describe-table \
+  --table-name adventureconnect-submissions \
+  --region eu-central-1 \
+  --query 'Table.StreamSpecification'
+```
+Expected: `{"StreamEnabled": true, "StreamViewType": "NEW_IMAGE"}`
+
+**Step 3 — Verify event source mapping:**
+```bash
+aws lambda list-event-source-mappings \
+  --function-name adventureconnect-notification-handler \
+  --region eu-central-1
+```
+Check `State` field — must be `Enabled`, not `Disabled` or `Creating`
