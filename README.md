@@ -264,4 +264,4 @@ aws logs tail /aws/lambda/adventureconnect-notification-handler --follow --regio
 - **decisions.md** — Architectural decisions, alternatives considered, trade-offs
 - **errors.md** — Issues encountered, root causes, fixes applied
 - **testing-log.md** — Test results, inputs, outputs, execution metrics
-- **tshoot.md** — Troubleshooting guides for common failure scenarios
+- **tshoot.md** — Troubleshooting guides for common failure scenarios  
