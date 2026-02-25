@@ -194,3 +194,83 @@ aws lambda list-event-source-mappings \
   --region eu-central-1
 ```
 Check `State` field — must be `Enabled`, not `Disabled` or `Creating`
+
+---
+
+## Troubleshooting Guide: CloudFront + S3 Frontend Issues
+
+### Symptom 1: CloudFront returns 403 Forbidden
+
+**Possible causes and fixes:**
+
+**Bucket policy missing or misconfigured:**
+```bash
+aws s3api get-bucket-policy --bucket YOUR-BUCKET-NAME --region eu-central-1
+```
+- Principal must be `cloudfront.amazonaws.com` (Service, not AWS)
+- Condition must include `AWS:SourceArn` matching your specific distribution ARN
+- Resource must be `arn:aws:s3:::YOUR-BUCKET/*` (objects, not bucket itself)
+
+**OAC not attached to distribution origin:**
+- AWS Console → CloudFront → distribution → Origins tab
+- Verify origin access control is set to your OAC, not "None"
+
+**index.html not uploaded to S3:**
+```bash
+aws s3 ls s3://YOUR-BUCKET-NAME --region eu-central-1
+```
+If empty, upload: `aws s3 cp frontend/index.html s3://YOUR-BUCKET-NAME/index.html --region eu-central-1`
+
+---
+
+### Symptom 2: Form submission fails with CORS error in browser
+
+**Browser console shows:** "Access to fetch blocked by CORS policy"
+
+**Cause:** API Gateway URL in index.html is wrong or still set to placeholder
+
+**Fix:**
+1. Run `terraform output api_endpoint` to get current URL
+2. Update line 619 in `frontend/index.html`:
+   ```javascript
+   const API_GATEWAY_URL = 'https://YOUR-ACTUAL-API-ID.execute-api.eu-central-1.amazonaws.com/prod/submit';
+   ```
+3. Re-upload: `aws s3 cp frontend/index.html s3://YOUR-BUCKET-NAME/index.html --region eu-central-1`
+4. Invalidate CloudFront cache if needed:
+   ```bash
+   aws cloudfront create-invalidation --distribution-id YOUR-DIST-ID --paths "/*" --region eu-central-1
+   ```
+
+---
+
+### Symptom 3: CloudFront serving stale content after index.html update
+
+**Symptom:** Updated index.html uploaded to S3 but browser still shows old version
+
+**Fix — Invalidate CloudFront cache:**
+```bash
+aws cloudfront create-invalidation \
+  --distribution-id YOUR-DISTRIBUTION-ID \
+  --paths "/*" \
+  --region eu-central-1
+```
+
+Wait 1-2 minutes, then hard refresh browser (Ctrl+Shift+R).
+
+**Get distribution ID:**
+```bash
+aws cloudfront list-distributions --query 'DistributionList.Items[].{Id:Id,Domain:DomainName}' --output table
+```
+
+---
+
+### Symptom 4: CloudFront distribution takes too long to deploy
+
+**Expected:** CloudFront distributions take 5-15 minutes to deploy globally after `terraform apply`
+
+**Check status:**
+```bash
+aws cloudfront get-distribution --id YOUR-DIST-ID --query 'Distribution.Status'
+```
+- `InProgress` — still deploying, wait
+- `Deployed` — ready to use
