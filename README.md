@@ -1,18 +1,18 @@
 # AdventureConnect Contact System
 
-A serverless contact form system built on AWS using Infrastructure as Code (Terraform). This project demonstrates cloud architecture fundamentals including serverless computing, NoSQL databases, event-driven architecture, and IAM security best practices.
+A serverless contact form system built on AWS using Infrastructure as Code (Terraform). This project demonstrates cloud architecture fundamentals including serverless computing, NoSQL databases, event-driven architecture, static website hosting, and IAM security best practices.
 
 ## Project Status
 
-**Current Phase:** SES Email Notifications (Sprint 3 Complete ✅)
+**Current Phase:** S3 + CloudFront Frontend (Sprint 4 Complete ✅)
 
 **Completed:**
 - ✅ Sprint 1: Lambda + DynamoDB backend
 - ✅ Sprint 2: API Gateway + CORS + Rate Limiting
 - ✅ Sprint 3: SES email notifications via event-driven architecture
+- ✅ Sprint 4: S3 + CloudFront static website frontend
 
 **Next:**
-- S3 static website hosting
 - CloudWatch monitoring and alerting
 
 **Note:** Infrastructure is deployed during active development sprints, then destroyed to minimize costs. All code is version-controlled and can be redeployed via Terraform in ~2 minutes.
@@ -57,12 +57,47 @@ A serverless contact form system built on AWS using Infrastructure as Code (Terr
 
 **Sandbox limitation:** SES account is in sandbox mode. In production, AWS support request required to send to unverified addresses.
 
+### Sprint 4: S3 + CloudFront Frontend
+
+![Sprint 4 Architecture](diagrams/architecture-sprint4.png)
+
+**Components:**
+- S3 bucket hosts static HTML/CSS/JS contact form (private, no public access)
+- CloudFront distribution serves content over HTTPS with global edge caching
+- Origin Access Control (OAC) restricts S3 access to designated CloudFront distribution only
+- Bucket policy scoped to specific CloudFront distribution ARN via Condition block
+- Terraform outputs expose CloudFront URL and API endpoint after every deployment
+
+**Two separate request flows:**
+- Page load: Browser → CloudFront → S3 → index.html returned and cached
+- Form submit: Browser → API Gateway → Lambda → DynamoDB → Stream → SES
+
+**Key Learning:** OAC replaces legacy OAI — S3 bucket stays private, CloudFront signs requests using sigv4. S3 static website hosting alone rejected due to lack of HTTPS and public bucket requirement.
+
+## Live Website
+
+After deployment via Terraform, the frontend is accessible at the CloudFront URL:
+
+```
+https://{distribution-id}.cloudfront.net
+```
+
+Get the URL after deployment:
+```bash
+terraform output cloudfront_domain_name
+```
+
 ## API Endpoint
 
 After deployment via Terraform, the API endpoint follows this format:
 
 ```
 https://{api-id}.execute-api.eu-central-1.amazonaws.com/prod/submit
+```
+
+Get the URL after deployment:
+```bash
+terraform output api_endpoint
 ```
 
 **Example request:**
@@ -94,14 +129,22 @@ curl -X POST https://abc123xyz.execute-api.eu-central-1.amazonaws.com/prod/submi
 │   ├── api_gateway.tf               # API Gateway REST API + CORS + rate limiting
 │   ├── notification_lambda.tf       # Notification Lambda + event source mapping
 │   ├── notification_iam.tf          # IAM role, SES policy, Stream policy
+│   ├── s3.tf                        # S3 bucket + public access block + bucket policy
+│   ├── cloudfront.tf                # CloudFront distribution + OAC
+│   ├── outputs.tf                   # CloudFront URL + API endpoint outputs
 │   └── variables.tf                 # Input variable definitions
 ├── lambda/
 │   ├── lambda_function.py           # Contact form handler
 │   └── notification_handler.py      # SES notification handler
+├── frontend/
+│   └── index.html                   # Static contact form website
+├── postman/
+│   └── adventureconnect.json        # Postman collection for API testing
 ├── diagrams/
 │   ├── architecture-sprint1.png
 │   ├── architecture-sprint2.png
-│   └── architecture-sprint3.png
+│   ├── architecture-sprint3.png
+│   └── architecture-sprint4.png
 ├── decisions.md                     # Architectural decisions and trade-offs
 ├── errors.md                        # Issues encountered and fixes
 ├── testing-log.md                   # Test results and verification
@@ -141,6 +184,7 @@ Create `terraform/terraform.tfvars` (not committed to Git):
 ```hcl
 sender_email    = "your-verified-sender@example.com"
 recipient_email = "your-verified-recipient@example.com"
+s3_bucket_name  = "your-unique-bucket-name"
 ```
 
 ### 4. Deploy Infrastructure
@@ -152,16 +196,34 @@ terraform plan
 terraform apply
 ```
 
-### 5. Verify Deployment
+### 5. Upload Frontend
 
 ```bash
+aws s3 cp frontend/index.html s3://YOUR-BUCKET-NAME/index.html --region eu-central-1
+```
+
+### 6. Get Deployment URLs
+
+```bash
+terraform output
+```
+
+Update `frontend/index.html` line 619 with the `api_endpoint` output value, then re-upload.
+
+### 7. Verify Deployment
+
+```bash
+# Check S3 bucket
+aws s3 ls s3://YOUR-BUCKET-NAME --region eu-central-1
+
+# Check CloudFront distribution
+aws cloudfront list-distributions --region eu-central-1
+
 # Check DynamoDB table and stream
 aws dynamodb describe-table --table-name adventureconnect-submissions --region eu-central-1
 
-# Check contact handler Lambda
+# Check Lambda functions
 aws lambda get-function --function-name adventureconnect-contact-handler --region eu-central-1
-
-# Check notification Lambda
 aws lambda get-function --function-name adventureconnect-notification-handler --region eu-central-1
 
 # Check event source mapping (Stream → notification Lambda)
@@ -170,7 +232,15 @@ aws lambda list-event-source-mappings --function-name adventureconnect-notificat
 
 ## Testing
 
-### Full End-to-End Test
+### Full End-to-End Test (Browser)
+
+1. Open `https://{your-cloudfront-url}.cloudfront.net` in browser
+2. Fill in name, email, message
+3. Click Send Message
+4. Verify success message displayed
+5. Check inbox for notification email
+
+### Full End-to-End Test (curl)
 
 ```bash
 curl -X POST https://YOUR-API-ID.execute-api.eu-central-1.amazonaws.com/prod/submit \
@@ -191,10 +261,10 @@ Then check:
 curl -X OPTIONS https://YOUR-API-ID.execute-api.eu-central-1.amazonaws.com/prod/submit -v
 ```
 
-### Verify DynamoDB Entry
+### Verify DynamoDB Entries
 
 ```bash
-aws dynamodb scan --table-name adventureconnect-submissions --region eu-central-1
+aws dynamodb scan --table-name adventureconnect-submissions --region eu-central-1 --output table
 ```
 
 ### Check CloudWatch Logs
@@ -235,9 +305,19 @@ aws logs tail /aws/lambda/adventureconnect-notification-handler --follow --regio
 
 **SES Resource `"*"` in IAM:** AWS does not support resource-level restrictions for `ses:SendEmail`. No ARN format exists for individual send operations. Compensate with verified identities, sending limits, and CloudWatch alerts.
 
+### Sprint 4: Static Website Hosting
+
+**Two Request Flows:** Page load goes Browser → CloudFront → S3. Form submission goes Browser → API Gateway directly. CloudFront is not involved in form submission — it only serves static files.
+
+**OAC vs OAI:** Origin Access Control replaces legacy Origin Access Identity. OAC uses sigv4 request signing, supports SSE-KMS, and is the current AWS-recommended approach. S3 bucket policy principal is `cloudfront.amazonaws.com` with Condition scoped to specific distribution ARN.
+
+**S3 Security:** All four public access block settings enabled. Bucket has no public access — only CloudFront can read from it via OAC. Direct S3 URL access returns 403.
+
+**Terraform Outputs:** `outputs.tf` exposes CloudFront URL and API endpoint after every apply — essential since API Gateway URL changes on each redeploy.
+
 ## Cost Estimation
 
-**Sprint 1 + 2 + 3 Combined (100 submissions/day):**
+**Sprint 1 + 2 + 3 + 4 Combined (100 submissions/day):**
 
 | Service | Usage | Monthly Cost |
 |---------|-------|--------------|
@@ -247,6 +327,8 @@ aws logs tail /aws/lambda/adventureconnect-notification-handler --follow --regio
 | DynamoDB | 3,000 writes | 0.003€ |
 | DynamoDB Streams | 3,000 reads | 0€ (free tier) |
 | SES | 3,000 emails | 0€ (first 62,000/month free) |
+| S3 | 3,000 GET requests | 0€ (free tier) |
+| CloudFront | 3,000 requests | 0€ (free tier) |
 | **Total** | | **~0.012€** |
 
 **All costs calculated in Euro (€) using 1 USD = 0.86 EUR**
@@ -256,7 +338,7 @@ aws logs tail /aws/lambda/adventureconnect-notification-handler --follow --regio
 - [x] Sprint 1: Lambda + DynamoDB backend
 - [x] Sprint 2: API Gateway + CORS + Rate Limiting
 - [x] Sprint 3: SES email notifications
-- [ ] Sprint 4: S3 static website frontend
+- [x] Sprint 4: S3 + CloudFront static website frontend
 - [ ] Sprint 5: CloudWatch monitoring and alerts
 
 ## Documentation
@@ -264,4 +346,4 @@ aws logs tail /aws/lambda/adventureconnect-notification-handler --follow --regio
 - **decisions.md** — Architectural decisions, alternatives considered, trade-offs
 - **errors.md** — Issues encountered, root causes, fixes applied
 - **testing-log.md** — Test results, inputs, outputs, execution metrics
-- **tshoot.md** — Troubleshooting guides for common failure scenarios  
+- **tshoot.md** — Troubleshooting guides for common failure scenarios
