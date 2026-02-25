@@ -190,8 +190,8 @@ Why SES resource is set to * in IAM policy:
 - AWS does not support resource-level restrictions for "ses:SendEmail"
 - There is no ARN format for "ses:SendEmail"
 - Trying to put an ARN there, the policy would either error or silently fail to grant access
-- This is an AWS service limitation, not a security flaw. It's documented in the SES IAM guide. In practice you compensate with other controls — verified identities, sending limits, and CloudWatch alerts on unexpected sending volume.
-- 
+- In practice compensate with other controls — verified identities, sending limits, and CloudWatch alerts on unexpected sending volume
+
 ---
 
 
@@ -241,3 +241,28 @@ How we handle it:
 Related:
 - DynamoDB is schema-flexible — type wrappers allow mixed item types in one table without fixed schema
 - This format appears in all Stream records regardless of view type chosen
+
+
+## Decision: Use Origin Access Control (OAC) to restrict access to S3
+
+Why this exists:
+- S3 hosts contact form website and CloudFront needs access to it
+
+Alternatives considered:
+- Origin Access Identity (OAI)
+
+Why rejected:
+- OAI cannot be configured if S3 is set to host a website
+- OAI is a legacy feature that AWS has deprecated in favor of OAC
+
+Why OAC chosen:
+- Enables CF customers to easily secure their S3 origins by permitting only designated CF distributions to access their S3 buckets
+- Provides server-side encryption with KMS keys when performing uploads and downloads through CF distribution
+- OAC supports more S3 authentication methods including SSE-KMS
+- OAC is the current AWS-recommended approach
+
+Trade-offs accepted:
+- OAC is slightly more complex to configure than OAI
+- Compared to making the bucket fully public, both OAC and OAI add complexity and a dependency on CloudFront — if CloudFront goes down, the site is inaccessible even though S3 is fine
+
+
