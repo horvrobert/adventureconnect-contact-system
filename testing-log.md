@@ -138,8 +138,7 @@ curl -X POST https://xp02d6nywi.execute-api.eu-central-1.amazonaws.com/prod/subm
 
 **Method:** AWS Console → Lambda → Test (same event as Test 1)
 **Expected:** Email delivered to robik.horvath@gmail.com
-**Actual:**
-- CloudWatch: `Failed to send email for test-123` → `raise` triggered retry
+**Actual:** CloudWatch: `Failed to send email for test-123` → `raise` triggered retry
 **Result:** ❌ Fail — environment variables still showing `[EMAIL_ADDRESS]` in console
 
 **Fix:** Ran `terraform apply` after updating `notification_lambda.tf` to use `var.sender_email` and `var.recipient_email`. 1 resource changed.
@@ -181,3 +180,71 @@ curl -X POST https://b8kceclkw4.execute-api.eu-central-1.amazonaws.com/prod/subm
 **Expected:** Notification Lambda invoked but skips record — logs show `Skipping event: MODIFY`
 **Actual:** CloudWatch log shows `Skipping event: MODIFY` ✅
 **Result:** ✅ Pass — INSERT filter working correctly, no duplicate emails on updates
+
+---
+
+## Sprint 4: S3 + CloudFront Frontend Testing
+
+**Date:** 2026-02-25
+
+### Test 1: CloudFront distribution deployment
+
+**Method:** `terraform apply` — verified CloudFront distribution created successfully
+
+**Expected:** Distribution created, domain name returned in outputs
+**Actual:**
+```
+cloudfront_domain_name = "d1ofpswor88kom.cloudfront.net"
+api_endpoint = "https://aspfcar444.execute-api.eu-central-1.amazonaws.com/prod/submit"
+```
+**Result:** ✅ Pass
+
+### Test 2: S3 bucket access block verification
+
+**Method:** AWS Console → S3 → adventureconnect-contact-form-bucket → Permissions
+
+**Expected:** All four public access block settings enabled
+**Actual:** Block all public access: On ✅
+**Result:** ✅ Pass
+
+### Test 3: Static website load via CloudFront
+
+**Method:** Opened `https://d1ofpswor88kom.cloudfront.net` in browser after uploading index.html
+
+**Command:**
+```bash
+aws s3 cp frontend/index.html s3://adventureconnect-contact-form-bucket/index.html --region eu-central-1
+```
+
+**Expected:** AdventureConnect contact form rendered in browser
+**Actual:** Page loaded correctly — two-panel layout, form fields visible, AdventureConnect branding ✅
+**Result:** ✅ Pass
+
+### Test 4: Full end-to-end browser submission
+
+**Method:** Filled in form via browser at CloudFront URL, clicked Send Message
+
+**Test Data:**
+- Name: Robert Robertovic
+- Email: robertovo@robert.robik
+- Message: Banik pyco!
+
+**Expected:**
+- Success message displayed in browser
+- DynamoDB record written
+- Email received at robik.horvath@gmail.com
+
+**Actual:**
+- Browser: Success message displayed ✅
+- Email received — Submission ID: 8fb6bb93-e9f3-4e34-a0e6-91e08a9469c6, Timestamp: 2026-02-25T08:24:46.912831 ✅
+- Sender: akkina.trifer@gmail.com (configured SES verified sender identity) ✅
+
+**Result:** ✅ Pass — full end-to-end flow working: Browser → CloudFront (page load) and Browser → API Gateway → Lambda → DynamoDB → Stream → SES → Email (form submission)
+
+### Test 5: Direct S3 URL access (security verification)
+
+**Method:** Attempted to access S3 bucket URL directly bypassing CloudFront
+
+**Expected:** 403 Access Denied — bucket is private, OAC restricts access
+**Actual:** 403 Access Denied ✅
+**Result:** ✅ Pass — OAC working correctly, S3 not publicly accessible
