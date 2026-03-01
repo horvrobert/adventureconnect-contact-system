@@ -270,28 +270,26 @@ Trade-offs accepted:
 ## Decision: Use SNS topic as alarm action
 
 Why this exists:
-- CloudWatch alarm needs to notify someone when the alarm is triggered
+- CloudWatch alarms require an action target — they cannot notify anyone directly
+- SNS acts as the notification middleman between CloudWatch and the recipient
 
 Alternatives considered:
-- Email
-- SMS
-- ChatOps (Slack, Teams, etc.)
+- SNS with email subscription (chosen)
+- SNS with SMS subscription
+- SNS with Lambda subscription forwarding to ChatOps (Slack, Teams)
 
 Why rejected:
-- Email cannot be sent natively from CloudWatch
 - SMS is expensive and not always delivered
-- ChatOps requires additional integration and configuration
+- ChatOps requires additional Lambda and webhook integration — unnecessary complexity for a portfolio project
 
-Why SNS chosen:
-- SNS is a managed pub/sub messaging service that enables you to send messages to multiple subscribers
+Why SNS with email subscription chosen:
+- CloudWatch can only trigger actions via SNS topic ARN — email is the SNS delivery protocol, not a CloudWatch feature
+- SNS can fan out to multiple subscribers simultaneously (email, SMS, Lambda) — one topic serves all notification channels
 - SNS is highly available and durable
-- SNS is cost-effective
-- SNS is easy to integrate with other AWS services
-- SNS can fan out to multiple subscribers (email, SMS, etc.) simultaneously
+- Email subscription is free and sufficient for this use case
 
 Trade-offs accepted:
-- SNS is slightly more complex to configure than email
-- Compared to email, SNS adds complexity and a dependency on SNS — if SNS goes down, the alarm is still triggered but the notification will not be sent
-
+- SNS adds a dependency — if SNS goes down, the alarm still triggers but the notification will not be sent
+- After terraform apply, SNS subscription confirmation email must be clicked manually — until confirmed, alerts are silently dropped
 
 
