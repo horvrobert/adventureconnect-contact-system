@@ -158,7 +158,6 @@ aws logs tail /aws/lambda/adventureconnect-notification-handler --follow --regio
 
 **Log group exists, shows `Skipping event: MODIFY`:**
 - Stream is working but record came through as MODIFY not INSERT
-- This can happen if the item already existed and was updated
 - Submit a completely new form submission
 
 **Log group exists, shows `Illegal address` or SES error:**
@@ -168,15 +167,12 @@ aws logs tail /aws/lambda/adventureconnect-notification-handler --follow --regio
 - Verify both addresses are verified in SES: AWS Console → SES → Verified Identities
 
 **Log group exists, shows `AccessDenied` for SES:**
-- Notification Lambda IAM role missing SES policy
 - Check: `aws iam list-attached-role-policies --role-name adventureconnect-notification-lambda-role`
 - Should show `adventureconnect-notification-ses-policy` attached
-- If missing, verify `notification_iam.tf` has the policy attachment resource and run `terraform apply`
 
 **Log group shows success but email not in inbox:**
 - Check spam/junk folder
 - Verify recipient address is verified in SES sandbox
-- SES sandbox only delivers to verified addresses — unverified recipients are silently rejected
 
 **Step 2 — Verify Stream configuration:**
 ```bash
@@ -201,8 +197,6 @@ Check `State` field — must be `Enabled`, not `Disabled` or `Creating`
 
 ### Symptom 1: CloudFront returns 403 Forbidden
 
-**Possible causes and fixes:**
-
 **Bucket policy missing or misconfigured:**
 ```bash
 aws s3api get-bucket-policy --bucket YOUR-BUCKET-NAME --region eu-central-1
@@ -210,10 +204,6 @@ aws s3api get-bucket-policy --bucket YOUR-BUCKET-NAME --region eu-central-1
 - Principal must be `cloudfront.amazonaws.com` (Service, not AWS)
 - Condition must include `AWS:SourceArn` matching your specific distribution ARN
 - Resource must be `arn:aws:s3:::YOUR-BUCKET/*` (objects, not bucket itself)
-
-**OAC not attached to distribution origin:**
-- AWS Console → CloudFront → distribution → Origins tab
-- Verify origin access control is set to your OAC, not "None"
 
 **index.html not uploaded to S3:**
 ```bash
@@ -223,29 +213,25 @@ If empty, upload: `aws s3 cp frontend/index.html s3://YOUR-BUCKET-NAME/index.htm
 
 ---
 
-### Symptom 2: Form submission fails with CORS error in browser
+### Symptom 2: Form submission fails with network error in browser
 
-**Browser console shows:** "Access to fetch blocked by CORS policy"
-
-**Cause:** API Gateway URL in index.html is wrong or still set to placeholder
+**Cause:** API Gateway URL in index.html is wrong or pointing to old endpoint from previous deployment
 
 **Fix:**
 1. Run `terraform output api_endpoint` to get current URL
-2. Update line 619 in `frontend/index.html`:
-   ```javascript
-   const API_GATEWAY_URL = 'https://YOUR-ACTUAL-API-ID.execute-api.eu-central-1.amazonaws.com/prod/submit';
-   ```
-3. Re-upload: `aws s3 cp frontend/index.html s3://YOUR-BUCKET-NAME/index.html --region eu-central-1`
-4. Invalidate CloudFront cache if needed:
-   ```bash
-   aws cloudfront create-invalidation --distribution-id YOUR-DIST-ID --paths "/*" --region eu-central-1
-   ```
+2. Update `frontend/index.html` with the new URL
+3. Re-upload:
+```bash
+aws s3 cp frontend/index.html s3://YOUR-BUCKET-NAME/index.html --region eu-central-1
+```
+4. Invalidate CloudFront cache:
+```bash
+aws cloudfront create-invalidation --distribution-id YOUR-DIST-ID --paths "/*" --region eu-central-1
+```
 
 ---
 
 ### Symptom 3: CloudFront serving stale content after index.html update
-
-**Symptom:** Updated index.html uploaded to S3 but browser still shows old version
 
 **Fix — Invalidate CloudFront cache:**
 ```bash
@@ -274,3 +260,78 @@ aws cloudfront get-distribution --id YOUR-DIST-ID --query 'Distribution.Status'
 ```
 - `InProgress` — still deploying, wait
 - `Deployed` — ready to use
+
+---
+
+## Troubleshooting Guide: CloudWatch Alarms and SNS Notifications
+
+### Symptom 1: CloudWatch alarms not sending email notifications
+
+**Symptom:** Alarm state changes to ALARM but no email received
+
+**Step 1 — Check SNS subscription status:**
+```bash
+aws sns list-subscriptions-by-topic \
+  --topic-arn YOUR-TOPIC-ARN \
+  --region eu-central-1
+```
+- `SubscriptionArn: PendingConfirmation` — confirmation email not clicked yet
+- `SubscriptionArn: arn:aws:sns:...` — confirmed and active
+
+**Fix:** Check email inbox for SNS confirmation message and click the confirmation link. The subject line is "AWS Notification - Subscription Confirmation".
+
+**Step 2 — Check alarm actions:**
+```bash
+aws cloudwatch describe-alarms \
+  --alarm-names adventureconnect-contact-handler-errors \
+  --region eu-central-1 \
+  --query 'MetricAlarms[].AlarmActions'
+```
+Should show your SNS topic ARN.
+
+**Step 3 — Check SNS topic exists:**
+```bash
+aws sns list-topics --region eu-central-1
+```
+Should show `adventureconnect-alerts` topic.
+
+---
+
+### Symptom 2: All alarms stuck in INSUFFICIENT_DATA state
+
+**Cause:** No metric data has been published yet — services haven't been invoked since deployment.
+
+**This is normal** for a fresh deployment with no traffic. Submit a test form submission and alarms will transition to OK state within 1-2 minutes.
+
+**Verify by checking alarm state:**
+```bash
+aws cloudwatch describe-alarms \
+  --region eu-central-1 \
+  --query 'MetricAlarms[].{Name:AlarmName,State:StateValue}' \
+  --output table
+```
+
+---
+
+### Symptom 3: CloudWatch dashboard shows "No data available"
+
+**Cause:** Same as above — no metric data published yet, or time range selected predates deployment.
+
+**Fix:**
+- Submit a test form submission to generate Lambda invocations
+- Adjust dashboard time range to last 1 hour
+- Wait 1-2 minutes for metrics to appear
+
+---
+
+### Symptom 4: Terraform apply fails on CloudWatch dashboard resource
+
+**Error:** `InvalidParameterInput: Invalid dashboard body`
+
+**Cause:** Dashboard JSON is malformed — usually a Terraform reference that didn't resolve correctly.
+
+**Fix:**
+```bash
+terraform plan -target=aws_cloudwatch_dashboard.main
+```
+Check the plan output for the dashboard body and verify all resource references resolve to actual values. Common issue: referencing a resource name that doesn't match the actual resource in Terraform state.
