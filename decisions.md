@@ -266,3 +266,32 @@ Trade-offs accepted:
 - Compared to making the bucket fully public, both OAC and OAI add complexity and a dependency on CloudFront — if CloudFront goes down, the site is inaccessible even though S3 is fine
 
 
+
+## Decision: Use SNS topic as alarm action
+
+Why this exists:
+- CloudWatch alarm needs to notify someone when the alarm is triggered
+
+Alternatives considered:
+- Email
+- SMS
+- ChatOps (Slack, Teams, etc.)
+
+Why rejected:
+- Email cannot be sent natively from CloudWatch
+- SMS is expensive and not always delivered
+- ChatOps requires additional integration and configuration
+
+Why SNS chosen:
+- SNS is a managed pub/sub messaging service that enables you to send messages to multiple subscribers
+- SNS is highly available and durable
+- SNS is cost-effective
+- SNS is easy to integrate with other AWS services
+- SNS can fan out to multiple subscribers (email, SMS, etc.) simultaneously
+
+Trade-offs accepted:
+- SNS is slightly more complex to configure than email
+- Compared to email, SNS adds complexity and a dependency on SNS — if SNS goes down, the alarm is still triggered but the notification will not be sent
+
+
+
