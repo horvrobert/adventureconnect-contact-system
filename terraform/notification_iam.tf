@@ -84,4 +84,4 @@ resource "aws_iam_policy" "notification_ses_policy" {
 resource "aws_iam_role_policy_attachment" "notification_ses_policy_attachment" {
   role       = aws_iam_role.notification_lambda_role.name
   policy_arn = aws_iam_policy.notification_ses_policy.arn
-}   
+}

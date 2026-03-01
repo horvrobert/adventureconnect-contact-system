@@ -165,8 +165,3 @@ resource "aws_api_gateway_usage_plan" "contact_form_usage_plan" {
 }
 
 
-# Output the API endpoint URL
-output "api_endpoint" {
-  description = "API Gateway endpoint URL"
-  value       = "${aws_api_gateway_stage.contact_form_stage.invoke_url}/submit"
-}

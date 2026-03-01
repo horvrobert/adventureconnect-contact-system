@@ -24,4 +24,5 @@ lambda/__pycache__/
 .idea/
 *.swp
 
-
+# Postman
+.postman/
