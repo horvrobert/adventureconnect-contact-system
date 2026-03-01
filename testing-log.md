@@ -171,8 +171,6 @@ curl -X POST https://b8kceclkw4.execute-api.eu-central-1.amazonaws.com/prod/subm
 - Billed duration: 362ms
 - Memory used: 85 MB out of 128 MB allocated
 
-**Notable:** Email delivered was from an earlier curl test (timestamp 2026-02-24T09:03:19) — the Stream retained the record and delivered it once the Lambda environment variables were corrected. Demonstrates automatic retry behaviour working as designed.
-
 ### Test 4: MODIFY event filtering verification
 
 **Method:** Manually updated an existing DynamoDB item via AWS Console to trigger a MODIFY stream event
@@ -201,7 +199,7 @@ api_endpoint = "https://aspfcar444.execute-api.eu-central-1.amazonaws.com/prod/s
 
 ### Test 2: S3 bucket access block verification
 
-**Method:** AWS Console → S3 → adventureconnect-contact-form-bucket → Permissions
+**Method:** AWS Console → S3 → adventureconnect-contact-form-bucket-rh → Permissions
 
 **Expected:** All four public access block settings enabled
 **Actual:** Block all public access: On ✅
@@ -209,11 +207,11 @@ api_endpoint = "https://aspfcar444.execute-api.eu-central-1.amazonaws.com/prod/s
 
 ### Test 3: Static website load via CloudFront
 
-**Method:** Opened `https://d1ofpswor88kom.cloudfront.net` in browser after uploading index.html
+**Method:** Opened CloudFront URL in browser after uploading index.html
 
 **Command:**
 ```bash
-aws s3 cp frontend/index.html s3://adventureconnect-contact-form-bucket/index.html --region eu-central-1
+aws s3 cp frontend/index.html s3://adventureconnect-contact-form-bucket-rh/index.html --region eu-central-1
 ```
 
 **Expected:** AdventureConnect contact form rendered in browser
@@ -237,9 +235,9 @@ aws s3 cp frontend/index.html s3://adventureconnect-contact-form-bucket/index.ht
 **Actual:**
 - Browser: Success message displayed ✅
 - Email received — Submission ID: 8fb6bb93-e9f3-4e34-a0e6-91e08a9469c6, Timestamp: 2026-02-25T08:24:46.912831 ✅
-- Sender: akkina.trifer@gmail.com (configured SES verified sender identity) ✅
+- Sender: akkina.trifer@gmail.com ✅
 
-**Result:** ✅ Pass — full end-to-end flow working: Browser → CloudFront (page load) and Browser → API Gateway → Lambda → DynamoDB → Stream → SES → Email (form submission)
+**Result:** ✅ Pass
 
 ### Test 5: Direct S3 URL access (security verification)
 
@@ -247,4 +245,73 @@ aws s3 cp frontend/index.html s3://adventureconnect-contact-form-bucket/index.ht
 
 **Expected:** 403 Access Denied — bucket is private, OAC restricts access
 **Actual:** 403 Access Denied ✅
-**Result:** ✅ Pass — OAC working correctly, S3 not publicly accessible
+**Result:** ✅ Pass
+
+---
+
+## Sprint 5: CloudWatch Monitoring & Alerts Testing
+
+**Date:** 2026-03-01
+
+### Test 1: CloudWatch alarms deployment
+
+**Method:** `terraform apply` — verified all alarms created successfully
+
+**Expected:** 8 alarms created, all in OK or INSUFFICIENT_DATA state
+**Actual:**
+```bash
+aws cloudwatch describe-alarms --region eu-central-1 --query 'MetricAlarms[].{Name:AlarmName,State:StateValue}' --output table
+```
+All 8 alarms created ✅
+**Result:** ✅ Pass
+
+### Test 2: SNS subscription confirmation
+
+**Method:** Clicked confirmation link in SNS subscription email after `terraform apply`
+
+**Expected:** Subscription status changes from PendingConfirmation to Confirmed
+**Actual:** Subscription confirmed ✅
+**Result:** ✅ Pass
+
+**Note:** This step is easy to miss — alerts are silently dropped until confirmation is clicked.
+
+### Test 3: CloudWatch dashboard verification
+
+**Method:** AWS Console → CloudWatch → Dashboards → adventureconnect-dashboard
+
+**Expected:** 8 widgets visible, grouped by service (Lambda, API Gateway, DynamoDB)
+**Actual:**
+- Lambda Errors widget — both functions visible ✅
+- Lambda Duration widget — data point at 241ms ✅
+- Lambda Invocations widget — contact handler and notification handler visible ✅
+- API Gateway Latency widget — data visible ✅
+- API Gateway 5XX Errors widget — data visible ✅
+- API Gateway 4XX Errors widget — data visible ✅
+- DynamoDB System Errors widget — visible ✅
+- DynamoDB Throttled Requests widget — visible ✅
+
+**Result:** ✅ Pass
+
+### Test 4: Full end-to-end test with dashboard verification
+
+**Method:** Browser form submission at CloudFront URL, verified metrics updated in dashboard
+
+**Test Data:**
+- Name: Robert Horvath
+- Email: robert@horvath.com
+- Message: Hello, this is a test message for Lambda and DynamoDB table.
+
+**Expected:**
+- Form submission succeeds
+- DynamoDB record written — Submission ID: 8fb81e5b-bb1d-4476-8145-5d8a0203281a, Timestamp: 2026-03-01T20:08:42.013921
+- Email received
+- Lambda Invocations metric increments in dashboard
+- Lambda Duration shows ~241ms warm start
+
+**Actual:**
+- All fields confirmed in DynamoDB scan ✅
+- Email delivered with correct submission ID and timestamp ✅
+- Lambda Duration: 241ms (well under 1000ms alarm threshold) ✅
+- Lambda Invocations: both contact handler and notification handler showing ✅
+
+**Result:** ✅ Pass — full stack operational with monitoring
