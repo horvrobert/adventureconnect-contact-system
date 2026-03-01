@@ -225,7 +225,7 @@ aws s3 cp frontend/index.html s3://adventureconnect-contact-form-bucket-rh/index
 **Test Data:**
 - Name: Robert Robertovic
 - Email: robertovo@robert.robik
-- Message: Banik pyco!
+- Message: Hello!
 
 **Expected:**
 - Success message displayed in browser
