@@ -74,6 +74,8 @@ A serverless contact form system built on AWS using Infrastructure as Code (Terr
 
 ### Sprint 5: CloudWatch Monitoring & Alerts
 
+![Sprint 5 Architecture](diagrams/architecture-sprint5.png) 
+
 **Components:**
 - SNS topic receives alarm notifications and fans out to email subscriber
 - 8 CloudWatch metric alarms covering Lambda, API Gateway, and DynamoDB
