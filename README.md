@@ -4,16 +4,14 @@ A serverless contact form system built on AWS using Infrastructure as Code (Terr
 
 ## Project Status
 
-**Current Phase:** S3 + CloudFront Frontend (Sprint 4 Complete ✅)
+**Current Phase:** CloudWatch Monitoring & Alerts (Sprint 5 Complete ✅)
 
 **Completed:**
 - ✅ Sprint 1: Lambda + DynamoDB backend
 - ✅ Sprint 2: API Gateway + CORS + Rate Limiting
 - ✅ Sprint 3: SES email notifications via event-driven architecture
 - ✅ Sprint 4: S3 + CloudFront static website frontend
-
-**Next:**
-- CloudWatch monitoring and alerting
+- ✅ Sprint 5: CloudWatch monitoring, alarms, SNS alerts, and dashboard
 
 **Note:** Infrastructure is deployed during active development sprints, then destroyed to minimize costs. All code is version-controlled and can be redeployed via Terraform in ~2 minutes.
 
@@ -74,6 +72,29 @@ A serverless contact form system built on AWS using Infrastructure as Code (Terr
 
 **Key Learning:** OAC replaces legacy OAI — S3 bucket stays private, CloudFront signs requests using sigv4. S3 static website hosting alone rejected due to lack of HTTPS and public bucket requirement.
 
+### Sprint 5: CloudWatch Monitoring & Alerts
+
+**Components:**
+- SNS topic receives alarm notifications and fans out to email subscriber
+- 8 CloudWatch metric alarms covering Lambda, API Gateway, and DynamoDB
+- CloudWatch dashboard visualizing all key metrics grouped by service
+- Full alert chain: metric breaches threshold → alarm → SNS → email
+
+**Alarms configured:**
+
+| Service | Metric | Threshold |
+|---------|--------|-----------|
+| Lambda (contact handler) | Errors | 0 |
+| Lambda (notification handler) | Errors | 0 |
+| Lambda (contact handler) | Duration | 1000ms |
+| API Gateway | Latency | 1000ms |
+| API Gateway | 5XXError | 0 |
+| API Gateway | 4XXError | 10 |
+| DynamoDB | SystemErrors | 0 |
+| DynamoDB | ThrottledRequests | 0 |
+
+**Key Learning:** CloudWatch cannot email directly — requires SNS as middleman. After `terraform apply`, SNS subscription confirmation email must be clicked or alerts won't deliver. 4XX threshold is 10 (not 0) because rate limiting intentionally returns 429.
+
 ## Live Website
 
 After deployment via Terraform, the frontend is accessible at the CloudFront URL:
@@ -131,6 +152,7 @@ curl -X POST https://abc123xyz.execute-api.eu-central-1.amazonaws.com/prod/submi
 │   ├── notification_iam.tf          # IAM role, SES policy, Stream policy
 │   ├── s3.tf                        # S3 bucket + public access block + bucket policy
 │   ├── cloudfront.tf                # CloudFront distribution + OAC
+│   ├── cloudwatch.tf                # CloudWatch alarms, SNS topic, dashboard
 │   ├── outputs.tf                   # CloudFront URL + API endpoint outputs
 │   └── variables.tf                 # Input variable definitions
 ├── lambda/
@@ -138,8 +160,6 @@ curl -X POST https://abc123xyz.execute-api.eu-central-1.amazonaws.com/prod/submi
 │   └── notification_handler.py      # SES notification handler
 ├── frontend/
 │   └── index.html                   # Static contact form website
-├── postman/
-│   └── adventureconnect.json        # Postman collection for API testing
 ├── diagrams/
 │   ├── architecture-sprint1.png
 │   ├── architecture-sprint2.png
@@ -196,31 +216,39 @@ terraform plan
 terraform apply
 ```
 
-### 5. Upload Frontend
+### 5. Confirm SNS Subscription
+
+After `terraform apply`, check your email for an SNS confirmation message and click the confirmation link. Without this, CloudWatch alarms will not deliver notifications.
+
+### 6. Upload Frontend
 
 ```bash
 aws s3 cp frontend/index.html s3://YOUR-BUCKET-NAME/index.html --region eu-central-1
 ```
 
-### 6. Get Deployment URLs
+### 7. Get Deployment URLs
 
 ```bash
 terraform output
 ```
 
-Update `frontend/index.html` line 619 with the `api_endpoint` output value, then re-upload.
-
-### 7. Verify Deployment
+Update `frontend/index.html` with the `api_endpoint` output value, then re-upload and invalidate CloudFront cache:
 
 ```bash
+aws cloudfront create-invalidation --distribution-id YOUR-DIST-ID --paths "/*" --region eu-central-1
+```
+
+### 8. Verify Deployment
+
+```bash
+# Check SNS subscription status
+aws sns list-subscriptions-by-topic --topic-arn YOUR-TOPIC-ARN --region eu-central-1
+
+# Check CloudWatch alarms
+aws cloudwatch describe-alarms --region eu-central-1 --output table
+
 # Check S3 bucket
 aws s3 ls s3://YOUR-BUCKET-NAME --region eu-central-1
-
-# Check CloudFront distribution
-aws cloudfront list-distributions --region eu-central-1
-
-# Check DynamoDB table and stream
-aws dynamodb describe-table --table-name adventureconnect-submissions --region eu-central-1
 
 # Check Lambda functions
 aws lambda get-function --function-name adventureconnect-contact-handler --region eu-central-1
@@ -239,6 +267,7 @@ aws lambda list-event-source-mappings --function-name adventureconnect-notificat
 3. Click Send Message
 4. Verify success message displayed
 5. Check inbox for notification email
+6. Check CloudWatch dashboard — Lambda Invocations metric should show a data point
 
 ### Full End-to-End Test (curl)
 
@@ -249,17 +278,6 @@ curl -X POST https://YOUR-API-ID.execute-api.eu-central-1.amazonaws.com/prod/sub
 ```
 
 Expected: `{"message":"Submission received","submissionId":"uuid-here"}`
-
-Then check:
-1. DynamoDB — record written with all fields
-2. CloudWatch `/aws/lambda/adventureconnect-notification-handler` — email sent log
-3. Inbox — email received from sender address
-
-### CORS Preflight Test
-
-```bash
-curl -X OPTIONS https://YOUR-API-ID.execute-api.eu-central-1.amazonaws.com/prod/submit -v
-```
 
 ### Verify DynamoDB Entries
 
@@ -275,6 +293,12 @@ aws logs tail /aws/lambda/adventureconnect-contact-handler --follow --region eu-
 
 # Notification handler logs
 aws logs tail /aws/lambda/adventureconnect-notification-handler --follow --region eu-central-1
+```
+
+### Check CloudWatch Alarms
+
+```bash
+aws cloudwatch describe-alarms --region eu-central-1 --query 'MetricAlarms[].{Name:AlarmName,State:StateValue}' --output table
 ```
 
 ## Key Learnings
@@ -303,21 +327,25 @@ aws logs tail /aws/lambda/adventureconnect-notification-handler --follow --regio
 
 **IAM Blast Radius:** Notification Lambda has its own IAM role with only SES and Stream permissions. Contact handler role has no SES access. Compromise of one Lambda cannot be used to exploit the other.
 
-**SES Resource `"*"` in IAM:** AWS does not support resource-level restrictions for `ses:SendEmail`. No ARN format exists for individual send operations. Compensate with verified identities, sending limits, and CloudWatch alerts.
-
 ### Sprint 4: Static Website Hosting
 
 **Two Request Flows:** Page load goes Browser → CloudFront → S3. Form submission goes Browser → API Gateway directly. CloudFront is not involved in form submission — it only serves static files.
 
-**OAC vs OAI:** Origin Access Control replaces legacy Origin Access Identity. OAC uses sigv4 request signing, supports SSE-KMS, and is the current AWS-recommended approach. S3 bucket policy principal is `cloudfront.amazonaws.com` with Condition scoped to specific distribution ARN.
+**OAC vs OAI:** Origin Access Control replaces legacy Origin Access Identity. OAC uses sigv4 request signing, supports SSE-KMS, and is the current AWS-recommended approach.
 
 **S3 Security:** All four public access block settings enabled. Bucket has no public access — only CloudFront can read from it via OAC. Direct S3 URL access returns 403.
 
-**Terraform Outputs:** `outputs.tf` exposes CloudFront URL and API endpoint after every apply — essential since API Gateway URL changes on each redeploy.
+### Sprint 5: CloudWatch Monitoring
+
+**Notification Chain:** CloudWatch cannot email directly. Full chain: metric breaches threshold → alarm state changes → SNS topic fires → email delivered. SNS subscription must be confirmed after deployment or alerts are silently dropped.
+
+**Alarm Thresholds:** Error alarms use threshold 0 — any error is a problem. Duration alarm uses 1000ms (not the 10s timeout) for early warning before Lambda actually fails. 4XX alarm uses threshold 10 because rate limiting intentionally returns 429.
+
+**Dashboard vs Alarms:** Dashboard provides visibility, alarms provide action. Both are needed — dashboard for operational awareness during incidents, alarms for proactive notification when something breaks.
 
 ## Cost Estimation
 
-**Sprint 1 + 2 + 3 + 4 Combined (100 submissions/day):**
+**All Sprints Combined (100 submissions/day):**
 
 | Service | Usage | Monthly Cost |
 |---------|-------|--------------|
@@ -329,6 +357,8 @@ aws logs tail /aws/lambda/adventureconnect-notification-handler --follow --regio
 | SES | 3,000 emails | 0€ (first 62,000/month free) |
 | S3 | 3,000 GET requests | 0€ (free tier) |
 | CloudFront | 3,000 requests | 0€ (free tier) |
+| CloudWatch | 8 alarms + 1 dashboard | 0€ (free tier) |
+| SNS | 3,000 notifications | 0€ (first 1M/month free) |
 | **Total** | | **~0.012€** |
 
 **All costs calculated in Euro (€) using 1 USD = 0.86 EUR**
@@ -339,7 +369,7 @@ aws logs tail /aws/lambda/adventureconnect-notification-handler --follow --regio
 - [x] Sprint 2: API Gateway + CORS + Rate Limiting
 - [x] Sprint 3: SES email notifications
 - [x] Sprint 4: S3 + CloudFront static website frontend
-- [ ] Sprint 5: CloudWatch monitoring and alerts
+- [x] Sprint 5: CloudWatch monitoring and alerts
 
 ## Documentation
 
