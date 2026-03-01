@@ -158,13 +158,12 @@ curl -X POST https://abc123xyz.execute-api.eu-central-1.amazonaws.com/prod/submi
 ├── lambda/
 │   ├── lambda_function.py           # Contact form handler
 │   └── notification_handler.py      # SES notification handler
-├── frontend/
-│   └── index.html                   # Static contact form website
 ├── diagrams/
 │   ├── architecture-sprint1.png
 │   ├── architecture-sprint2.png
 │   ├── architecture-sprint3.png
-│   └── architecture-sprint4.png
+│   ├── architecture-sprint4.png
+│   └── architecture-sprint5.png
 ├── decisions.md                     # Architectural decisions and trade-offs
 ├── errors.md                        # Issues encountered and fixes
 ├── testing-log.md                   # Test results and verification
