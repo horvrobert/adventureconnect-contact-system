@@ -26,3 +26,6 @@ lambda/__pycache__/
 
 # Postman
 .postman/
+
+# Frontend
+frontend/
