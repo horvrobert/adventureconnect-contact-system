@@ -315,3 +315,68 @@ All 8 alarms created ✅
 - Lambda Invocations: both contact handler and notification handler showing ✅
 
 **Result:** ✅ Pass — full stack operational with monitoring
+
+---
+
+## Sprint 6: CI/CD Pipeline & Remote State Testing
+
+**Date:** 2026-03-04
+
+### Test 1: Remote state migration
+
+**Method:** `terraform init -reconfigure` after adding S3 backend block to provider.tf
+
+**Expected:** Terraform prompts to copy local state to S3 backend
+**Actual:** Prompted "Do you want to copy existing state to the new backend?" — answered yes
+**Result:** ✅ Pass
+
+**Verification:**
+```bash
+aws s3 ls s3://robikov-terraform-state-bucket/adventureconnect-contact-system/
+```
+Output: `2026-03-04 08:33:16  77984 terraform.tfstate`
+
+### Test 2: DynamoDB state locking table
+
+**Method:** Verified table created after `terraform apply`
+
+```bash
+aws dynamodb list-tables --region eu-central-1
+```
+
+**Expected:** `adventureconnect-terraform-locks` present
+**Actual:** Table listed alongside `adventureconnect-submissions` ✅
+**Result:** ✅ Pass
+
+### Test 3: OIDC provider and IAM role creation
+
+**Method:** `terraform apply` after adding `github_oidc.tf`
+
+**Expected:** 3 resources created — OIDC provider, IAM role, IAM role policy
+**Actual:** 3 resources added successfully ✅
+
+**Verification:**
+```bash
+aws iam get-role --role-name adventureconnect-github-actions-role --query 'Role.Arn' --output text
+```
+Output: `arn:aws:iam::373270679710:role/adventureconnect-github-actions-role` ✅
+**Result:** ✅ Pass
+
+### Test 4: GitHub Actions pipeline — first run
+
+**Method:** Pushed `terraform.yml` workflow file to main branch
+
+**Expected:** Pipeline triggers, both jobs succeed
+**Actual:**
+- Terraform Plan: ✅ 23s
+- Terraform Apply: ✅ 24s
+- Total duration: 53s
+- OIDC authentication: working — no credentials stored in GitHub Secrets
+
+**Result:** ✅ Pass
+
+### Test 5: Pipeline format check enforcement
+
+**Note:** `terraform fmt -check` runs as a pipeline gate before plan. Any unformatted `.tf` file will fail the pipeline before reaching AWS. Verified by confirming fmt step passes on clean codebase.
+
+**Result:** ✅ Pass
