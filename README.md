@@ -4,7 +4,7 @@ A serverless contact form system built on AWS using Infrastructure as Code (Terr
 
 ## Project Status
 
-**Current Phase:** CloudWatch Monitoring & Alerts (Sprint 5 Complete ✅)
+**Current Phase:** CI/CD Pipeline & Remote State (Sprint 6 Complete ✅)
 
 **Completed:**
 - ✅ Sprint 1: Lambda + DynamoDB backend
@@ -12,6 +12,7 @@ A serverless contact form system built on AWS using Infrastructure as Code (Terr
 - ✅ Sprint 3: SES email notifications via event-driven architecture
 - ✅ Sprint 4: S3 + CloudFront static website frontend
 - ✅ Sprint 5: CloudWatch monitoring, alarms, SNS alerts, and dashboard
+- ✅ Sprint 6: Remote Terraform state (S3 + DynamoDB locking) + GitHub Actions CI/CD with OIDC
 
 **Note:** Infrastructure is deployed during active development sprints, then destroyed to minimize costs. All code is version-controlled and can be redeployed via Terraform in ~2 minutes.
 
@@ -97,6 +98,25 @@ A serverless contact form system built on AWS using Infrastructure as Code (Terr
 
 **Key Learning:** CloudWatch cannot email directly — requires SNS as middleman. After `terraform apply`, SNS subscription confirmation email must be clicked or alerts won't deliver. 4XX threshold is 10 (not 0) because rate limiting intentionally returns 429.
 
+### Sprint 6: CI/CD Pipeline & Remote State
+
+![Sprint 6 Architecture](diagrams/architecture-sprint6.png)
+
+**Components:**
+- S3 backend stores Terraform state remotely (`robikov-terraform-state-bucket/adventureconnect-contact-system/terraform.tfstate`)
+- DynamoDB table (`adventureconnect-terraform-locks`) provides state locking — prevents concurrent applies
+- GitHub Actions workflow triggers on push to `main` and pull requests
+- OIDC authentication — no long-lived AWS credentials stored anywhere
+- IAM role (`adventureconnect-github-actions-role`) assumed by GitHub Actions runner via short-lived token
+- Pipeline stages: Checkout → OIDC auth → Terraform init → fmt check → validate → plan → apply
+
+**Pipeline behavior:**
+- Push to `main` → full plan + apply (infrastructure deployed automatically)
+- Pull request → plan only (no apply, plan result posted as PR comment)
+- `terraform apply` is never run locally — all infrastructure changes go through git
+
+**Key Learning:** OIDC eliminates long-lived credentials. GitHub requests a short-lived token per run, AWS verifies it against the registered OIDC provider, and issues temporary credentials scoped to the specific repository. No secrets to rotate or leak.
+
 ## Live Website
 
 After deployment via Terraform, the frontend is accessible at the CloudFront URL:
@@ -144,8 +164,13 @@ curl -X POST https://abc123xyz.execute-api.eu-central-1.amazonaws.com/prod/submi
 
 ```
 .
+├── .github/
+│   └── workflows/
+│       └── terraform.yml                # GitHub Actions CI/CD pipeline
 ├── terraform/
-│   ├── provider.tf                  # AWS provider configuration
+│   ├── provider.tf                  # AWS provider + S3 remote backend configuration
+│   ├── state.tf                     # DynamoDB state locking table
+│   ├── github_oidc.tf               # OIDC identity provider + GitHub Actions IAM role
 │   ├── dynamodb.tf                  # DynamoDB table + Streams configuration
 │   ├── iam.tf                       # IAM roles and policies (contact handler)
 │   ├── lambda.tf                    # Contact form Lambda function
@@ -165,7 +190,8 @@ curl -X POST https://abc123xyz.execute-api.eu-central-1.amazonaws.com/prod/submi
 │   ├── architecture-sprint2.png
 │   ├── architecture-sprint3.png
 │   ├── architecture-sprint4.png
-│   └── architecture-sprint5.png
+│   ├── architecture-sprint5.png
+│   └── architecture-sprint6.png
 ├── decisions.md                     # Architectural decisions and trade-offs
 ├── errors.md                        # Issues encountered and fixes
 ├── testing-log.md                   # Test results and verification
@@ -176,11 +202,27 @@ curl -X POST https://abc123xyz.execute-api.eu-central-1.amazonaws.com/prod/submi
 ## Prerequisites
 
 - [AWS CLI](https://aws.amazon.com/cli/) configured with credentials
-- [Terraform](https://www.terraform.io/downloads) >= 1.0
+- [Terraform](https://www.terraform.io/downloads) >= 1.10
 - AWS account with appropriate permissions
 - Verified SES email identities in eu-central-1
+- GitHub repository with Actions enabled
 
 ## Deployment
+
+### Automated Deployment (CI/CD — Sprint 6+)
+
+All infrastructure changes deploy automatically via GitHub Actions:
+
+1. Make Terraform changes locally
+2. Commit and push to `main`
+3. GitHub Actions runs: init → fmt check → validate → plan → apply
+4. Infrastructure updated in AWS automatically
+
+For pull requests, only `terraform plan` runs — no apply until merged.
+
+### Manual Deployment (Bootstrap only)
+
+Required only for first-time setup or if the OIDC role needs to be recreated.
 
 ### 1. Clone Repository
 
@@ -208,7 +250,14 @@ recipient_email = "your-verified-recipient@example.com"
 s3_bucket_name  = "your-unique-bucket-name"
 ```
 
-### 4. Deploy Infrastructure
+### 4. Add GitHub Secrets
+
+In GitHub repo → Settings → Secrets and variables → Actions, add:
+- `SENDER_EMAIL`
+- `RECIPIENT_EMAIL`
+- `S3_BUCKET_NAME`
+
+### 5. Deploy Infrastructure
 
 ```bash
 cd terraform
@@ -217,7 +266,7 @@ terraform plan
 terraform apply
 ```
 
-### 5. Confirm SNS Subscription
+### 6. Confirm SNS Subscription
 
 After `terraform apply`, check your email for an SNS confirmation message and click the confirmation link. Without this, CloudWatch alarms will not deliver notifications.
 
@@ -344,6 +393,16 @@ aws cloudwatch describe-alarms --region eu-central-1 --query 'MetricAlarms[].{Na
 
 **Dashboard vs Alarms:** Dashboard provides visibility, alarms provide action. Both are needed — dashboard for operational awareness during incidents, alarms for proactive notification when something breaks.
 
+### Sprint 6: CI/CD Pipeline & Remote State
+
+**Remote State:** Terraform state stored in S3 with DynamoDB locking. Multiple operators (or pipeline runners) cannot corrupt state by running concurrent applies. State is versioned — roll back to any previous state if needed.
+
+**OIDC vs Access Keys:** OIDC eliminates long-lived credentials entirely. GitHub runner requests a short-lived token, AWS verifies the token against the OIDC provider and checks the repo condition, then issues temporary credentials. Nothing to rotate, nothing to leak.
+
+**Pipeline Gates:** `terraform fmt -check` and `terraform validate` run before plan — broken or unformatted code fails fast before touching AWS. Plan runs before apply — no blind applies.
+
+**Bootstrap Problem:** OIDC provider and IAM role must exist before the pipeline can authenticate. These are created locally via `terraform apply` once, then managed by the pipeline going forward.
+
 ## Cost Estimation
 
 **All Sprints Combined (100 submissions/day):**
@@ -371,6 +430,7 @@ aws cloudwatch describe-alarms --region eu-central-1 --query 'MetricAlarms[].{Na
 - [x] Sprint 3: SES email notifications
 - [x] Sprint 4: S3 + CloudFront static website frontend
 - [x] Sprint 5: CloudWatch monitoring and alerts
+- [x] Sprint 6: Remote state (S3 + DynamoDB) + GitHub Actions CI/CD with OIDC
 
 ## Documentation
 
