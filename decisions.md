@@ -256,7 +256,7 @@ Why rejected:
 - OAI is a legacy feature that AWS has deprecated in favor of OAC
 
 Why OAC chosen:
-- Enables CF customers to easily secure their S3 origins by permitting only designated CF distributions to access their S3 buckets
+- Restricts S3 bucket access to a specific CloudFront distribution only — the bucket remains private and cannot be accessed directly via S3 URL or by any other CloudFront distribution
 - Provides server-side encryption with KMS keys when performing uploads and downloads through CF distribution
 - OAC supports more S3 authentication methods including SSE-KMS
 - OAC is the current AWS-recommended approach
@@ -293,3 +293,90 @@ Trade-offs accepted:
 - After terraform apply, SNS subscription confirmation email must be clicked manually — until confirmed, alerts are silently dropped
 
 
+## Decision: GitHub Actions AWS Authentication — OIDC vs Access Keys
+
+Why this exists:
+- GitHub Actions CI/CD pipeline needs AWS credentials to run terraform plan and terraform apply
+- Two authentication methods were evaluated before implementation
+
+Alternatives considered:
+- OIDC (OpenID Connect) with IAM role assumption (chosen)
+- IAM user with static access keys stored in GitHub Secrets
+
+Why IAM access keys rejected:
+- Long-lived credentials stored in GitHub Secrets are a security antipattern
+- Keys require manual rotation, exposure monitoring, and manual revocation if leaked
+- A leaked key grants persistent AWS access until manually revoked
+- Operational overhead with no architectural benefit over OIDC
+
+Why OIDC chosen:
+- GitHub acts as a trusted identity provider — AWS issues short-lived tokens per pipeline run via sts:AssumeRoleWithWebIdentity
+- No credentials stored anywhere — nothing to leak, rotate, or monitor
+- Trust condition is scoped to a specific GitHub repository — other repos cannot assume the role
+- Industry standard pattern for GitHub Actions to AWS authentication
+
+Trade-offs accepted:
+- More complex initial setup — requires IAM OIDC provider registration and trust policy configuration
+- OIDC provider and IAM role must exist before the pipeline can run — bootstrapping requires local terraform apply
+- If the OIDC provider or IAM role is accidentally destroyed, the pipeline loses AWS access immediately
+
+
+## Decision: Remote Terraform state — S3 backend with DynamoDB locking
+
+Why this exists:
+- Local state cannot be accessed by CI/CD pipeline runners
+- Multiple operators running terraform apply simultaneously can corrupt state
+- State files contain sensitive resource data and should not be committed to Git
+
+Alternatives considered:
+- Local state (default)
+- Terraform Cloud remote state
+
+Why local state rejected:
+- State file lives on one machine — pipeline runners have no access to it
+- No locking — two concurrent applies can produce conflicting state
+- State file accidentally committed to Git exposes resource ARNs and sensitive data
+
+Why Terraform Cloud rejected:
+- Additional service dependency and account required
+- S3 backend is native AWS, consistent with the rest of the project's tooling
+- No cost at this scale
+
+Why S3 + DynamoDB chosen:
+- S3 stores state remotely — accessible from any machine or pipeline runner
+- S3 versioning enables rollback to any previous state if an apply goes wrong
+- DynamoDB provides atomic locking — only one apply can run at a time
+- Encryption at rest via AES256 — state data protected
+- Entirely within AWS — no external service dependency
+
+Trade-offs accepted:
+- Bootstrap problem: S3 bucket and DynamoDB table must exist before backend can be configured — requires initial local apply with local state, then migration
+- If S3 bucket or DynamoDB table is accidentally destroyed, all pipeline runs fail until restored
+- State bucket must never be destroyed — protect with lifecycle prevent_destroy
+
+
+## Decision: Terraform state locking — DynamoDB over S3 native locking
+
+Why this exists:
+- Terraform S3 backend supports two locking mechanisms: DynamoDB table or native S3 locking (use_lockfile, Terraform 1.10+)
+- A locking mechanism must be chosen before adding CI/CD
+
+Alternatives considered:
+- DynamoDB table locking (chosen)
+- S3 native locking via use_lockfile = true (Terraform >= 1.10 only)
+
+Why S3 native locking rejected:
+- Requires Terraform >= 1.10 — newer feature with less production history
+- Less widely documented and recognised in enterprise environments
+- Would have made the DynamoDB table created earlier redundant
+
+Why DynamoDB locking chosen:
+- Established pattern — every enterprise Terraform S3 backend tutorial uses DynamoDB locking
+- Interviewers will recognise it immediately
+- DynamoDB table already created as part of Sprint 6 remote state setup
+- PAY_PER_REQUEST billing — lock operations cost fractions of a cent
+
+Trade-offs accepted:
+- Deprecated warning in Terraform >= 1.10 (dynamodb_table parameter)
+- Additional resource to manage — DynamoDB table must exist before backend initialises
+- Minor: if DynamoDB table is deleted, terraform init fails until table is recreated
