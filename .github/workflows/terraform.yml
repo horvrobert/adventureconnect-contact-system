@@ -1,0 +1,111 @@
+name: Terraform CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  TF_VERSION: "1.3.0"
+  AWS_REGION: "eu-central-1"
+  WORKING_DIR: "./terraform"
+
+jobs:
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::373270679710:role/adventureconnect-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform init
+
+      - name: Terraform Format Check
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform fmt -check
+
+      - name: Terraform Validate
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform plan \
+            -var="sender_email=${{ secrets.SENDER_EMAIL }}" \
+            -var="recipient_email=${{ secrets.RECIPIENT_EMAIL }}" \
+            -var="s3_bucket_name=${{ secrets.S3_BUCKET_NAME }}" \
+            -out=tfplan
+        env:
+          TF_VAR_sender_email: ${{ secrets.SENDER_EMAIL }}
+          TF_VAR_recipient_email: ${{ secrets.RECIPIENT_EMAIL }}
+          TF_VAR_s3_bucket_name: ${{ secrets.S3_BUCKET_NAME }}
+
+      - name: Post Plan to PR
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          script: |
+            const output = `#### Terraform Plan 📖
+            Plan completed successfully. Review before merging.`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::373270679710:role/adventureconnect-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        working-directory: ${{ env.WORKING_DIR }}
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          terraform apply -auto-approve \
+            -var="sender_email=${{ secrets.SENDER_EMAIL }}" \
+            -var="recipient_email=${{ secrets.RECIPIENT_EMAIL }}" \
+            -var="s3_bucket_name=${{ secrets.S3_BUCKET_NAME }}"
