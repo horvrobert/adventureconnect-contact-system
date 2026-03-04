@@ -335,3 +335,84 @@ aws cloudwatch describe-alarms \
 terraform plan -target=aws_cloudwatch_dashboard.main
 ```
 Check the plan output for the dashboard body and verify all resource references resolve to actual values. Common issue: referencing a resource name that doesn't match the actual resource in Terraform state.
+
+---
+
+## Troubleshooting Guide: GitHub Actions Pipeline Failures
+
+### Symptom 1: OIDC authentication fails — "Could not assume role"
+
+**Error:** `Error: Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity`
+
+**Troubleshooting Steps:**
+
+1. Verify the IAM role trust policy condition matches your repo exactly:
+```bash
+aws iam get-role --role-name adventureconnect-github-actions-role \
+  --query 'Role.AssumeRolePolicyDocument'
+```
+The `sub` condition must be `repo:horvrobert/adventureconnect-contact-system:*` — no `https://github.com/` prefix.
+
+2. Verify OIDC provider exists:
+```bash
+aws iam list-open-id-connect-providers
+```
+Should show `token.actions.githubusercontent.com`
+
+3. Verify `id-token: write` permission is set in the workflow `permissions` block — without this GitHub cannot issue the OIDC token.
+
+**Common causes:**
+- `https://github.com/` prefix accidentally included in the sub condition
+- `id-token: write` missing from workflow permissions
+- OIDC provider destroyed and not recreated
+
+---
+
+### Symptom 2: Terraform Init fails — "Error acquiring the state lock"
+
+**Error:** `ResourceNotFoundException: Requested resource not found` on DynamoDB table
+
+**Cause:** DynamoDB locking table `adventureconnect-terraform-locks` does not exist.
+
+**Fix:**
+```bash
+cd terraform
+terraform init -reconfigure  # temporarily bypass backend
+terraform apply -target=aws_dynamodb_table.terraform_locks
+terraform init -migrate-state
+```
+
+---
+
+### Symptom 3: Pipeline fails on `terraform fmt -check`
+
+**Error:** `Files not formatted. Run terraform fmt to fix.`
+
+**Fix — run locally before pushing:**
+```bash
+cd terraform
+terraform fmt
+git add -A
+git commit -m "Fix: terraform fmt"
+git push
+```
+
+---
+
+### Symptom 4: Terraform Init fails — "Unsupported argument use_lockfile"
+
+**Cause:** `use_lockfile = true` requires Terraform >= 1.10. Pipeline is running an older version.
+
+**Fix:** Update `TF_VERSION` in `.github/workflows/terraform.yml`:
+```yaml
+TF_VERSION: "1.10.0"
+```
+Or replace `use_lockfile = true` with `dynamodb_table = "adventureconnect-terraform-locks"` in `provider.tf` backend block.
+
+---
+
+### Symptom 5: Apply job skipped — only plan runs
+
+**Cause:** Apply job only runs on `push` to `main`. If you opened a PR, only plan runs by design.
+
+**Expected behavior:** Merge the PR to main → apply triggers automatically.
