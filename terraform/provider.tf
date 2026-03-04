@@ -7,6 +7,13 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  backend "s3" {
+    bucket       = "robikov-terraform-state-bucket"
+    key          = "adventureconnect-contact-system/terraform.tfstate"
+    region       = "eu-central-1"
+    use_lockfile = true
+  }
 }
 
 provider "aws" {
