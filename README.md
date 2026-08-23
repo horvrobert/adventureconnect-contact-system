@@ -1,6 +1,10 @@
 # AdventureConnect Contact System
 
-A serverless contact form system built on AWS using Infrastructure as Code (Terraform). This project demonstrates cloud architecture fundamentals including serverless computing, NoSQL databases, event-driven architecture, static website hosting, and IAM security best practices.
+A serverless contact form on AWS, built entirely with Terraform.
+
+A browser posts to API Gateway → Lambda writes to DynamoDB → a DynamoDB Stream triggers a second Lambda that sends email via SES. The static frontend sits in a private S3 bucket behind CloudFront with Origin Access Control. Eight CloudWatch alarms route to SNS. Everything deploys through GitHub Actions using OIDC — no stored AWS credentials, with remote Terraform state in S3 and DynamoDB locking.
+
+Built across six sprints; the sections below document each one, with architecture decisions in decisions.md.
 
 ## Project Status
 
