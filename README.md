@@ -270,13 +270,13 @@ terraform apply
 
 After `terraform apply`, check your email for an SNS confirmation message and click the confirmation link. Without this, CloudWatch alarms will not deliver notifications.
 
-### 6. Upload Frontend
+### 7. Upload Frontend
 
 ```bash
 aws s3 cp frontend/index.html s3://YOUR-BUCKET-NAME/index.html --region eu-central-1
 ```
 
-### 7. Get Deployment URLs
+### 8. Get Deployment URLs
 
 ```bash
 terraform output
@@ -288,7 +288,7 @@ Update `frontend/index.html` with the `api_endpoint` output value, then re-uploa
 aws cloudfront create-invalidation --distribution-id YOUR-DIST-ID --paths "/*" --region eu-central-1
 ```
 
-### 8. Verify Deployment
+### 9. Verify Deployment
 
 ```bash
 # Check SNS subscription status
