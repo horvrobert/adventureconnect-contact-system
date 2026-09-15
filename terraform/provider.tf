@@ -9,7 +9,7 @@ terraform {
   }
 
   backend "s3" {
-    bucket         = "adventureconnect-terraform-state-bucket"
+    bucket         = "robikov-terraform-state-bucket"
     key            = "adventureconnect-contact-system/terraform.tfstate"
     region         = "eu-central-1"
     dynamodb_table = "adventureconnect-terraform-locks"
