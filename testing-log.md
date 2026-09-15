@@ -362,18 +362,19 @@ aws iam get-role --role-name adventureconnect-github-actions-role --query 'Role.
 Output: `arn:aws:iam::373270679710:role/adventureconnect-github-actions-role` ✅
 **Result:** ✅ Pass
 
-### Test 4: GitHub Actions pipeline — first run
+### Test 4: GitHub Actions pipeline
 
 **Method:** Pushed `terraform.yml` workflow file to main branch
 
 **Expected:** Pipeline triggers, both jobs succeed
 **Actual:**
-- Terraform Plan: ✅ 23s
-- Terraform Apply: ✅ 24s
-- Total duration: 53s
-- OIDC authentication: working — no credentials stored in GitHub Secrets
+- Run 1: Terraform Plan failed (exit code 1)
+- Run 2 (Terraform pinned to 1.10.0, DynamoDB locking): Plan ✅ 23s, Apply ✅ 24s, total 53s — OIDC authentication worked
+- Run 3 onward: failed at authentication — `Could not assume role with OIDC: No OpenIDConnect provider found in your account`
 
-**Result:** ✅ Pass
+**Result:** ⚠️ Passed once, then failed
+
+**Reviewed September 2026:** Run 2 applied a commit that did not yet contain `github_oidc.tf`, while the OIDC provider and role were already in state from a local apply. Terraform most likely destroyed them as resources no longer in configuration. The apply log has expired, so this cannot be confirmed. See README Known Limitations.
 
 ### Test 5: Pipeline format check enforcement
 

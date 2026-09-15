@@ -74,7 +74,7 @@ Trade-offs accepted:
 
 Why this exists:
 - Need public HTTPS endpoint to expose Lambda function to frontend
-- REST API provides production-grade features: request validation, usage plans, detailed metrics
+- REST API offers request validation, usage plans and detailed metrics that HTTP API does not
 - Industry standard for enterprise serverless architectures
 
 Alternatives considered:
@@ -91,12 +91,17 @@ Trade-offs accepted:
 - Slightly higher latency (~10-20ms overhead from additional features)
 - At contact form scale (100 requests/day), cost difference is ~0.008 € per month (negligible)
 - Learning production patterns matters more than cost optimization for portfolio project
-- Usage plans enable rate limiting for cost protection (1000 req/day max = 0.09 € monthly worst case)
+- Usage plans were intended to rate-limit for cost protection — see Outcome below
 
 When to reconsider:
 - High-volume public API (>10M requests/month) where cost matters
 - Simple Lambda proxy with no need for request validation or usage plans
 - Optimizing for lowest possible latency (HTTP API is ~10ms faster)
+
+Outcome (reviewed September 2026):
+- Neither request validation nor an enforced usage plan was implemented — the method does not require an API key, so the usage plan never limited anything
+- On what was actually deployed, HTTP API with route-level throttling would have been cheaper and simpler
+- The reasons for choosing REST API did not survive implementation
 
 ---
 
@@ -184,13 +189,12 @@ Why programmatic verification of arbitrary addresses is not possible:
 Trade-offs accepted:
 - In current state, users do not receive confirmation emails — only site owner is notified
 - Acceptable for portfolio/learning project demonstrating the architecture
-- Production readiness is one AWS support request away from full functionality
+- Sending to user-submitted addresses requires SES production access; other gaps (input validation, stream failure handling) are listed in the README's Known Limitations
 
-Why SES resource is set to * in IAM policy:
-- AWS does not support resource-level restrictions for "ses:SendEmail"
-- There is no ARN format for "ses:SendEmail"
-- Trying to put an ARN there, the policy would either error or silently fail to grant access
-- In practice compensate with other controls — verified identities, sending limits, and CloudWatch alerts on unexpected sending volume
+SES resource in the IAM policy (corrected September 2026):
+- The policy uses Resource "*", originally on the belief that "ses:SendEmail" has no resource-level support — that was wrong
+- "ses:SendEmail" accepts SES identity ARNs as resources (arn:aws:ses:REGION:ACCOUNT_ID:identity/IDENTITY)
+- The policy should be scoped to the verified sender identity; leaving it as "*" is a least-privilege gap
 
 ---
 
@@ -252,12 +256,12 @@ Alternatives considered:
 - Origin Access Identity (OAI)
 
 Why rejected:
-- OAI cannot be configured if S3 is set to host a website
-- OAI is a legacy feature that AWS has deprecated in favor of OAC
+- OAI is the legacy mechanism; AWS recommends OAC
+- Note: neither OAI nor OAC works with an S3 static website endpoint, which CloudFront treats as a custom origin. This design uses the S3 REST endpoint with OAC
 
 Why OAC chosen:
 - Restricts S3 bucket access to a specific CloudFront distribution only — the bucket remains private and cannot be accessed directly via S3 URL or by any other CloudFront distribution
-- Provides server-side encryption with KMS keys when performing uploads and downloads through CF distribution
+- Works with objects encrypted with SSE-KMS (OAI does not)
 - OAC supports more S3 authentication methods including SSE-KMS
 - OAC is the current AWS-recommended approach
 
@@ -283,7 +287,7 @@ Why rejected:
 - ChatOps requires additional Lambda and webhook integration — unnecessary complexity for a portfolio project
 
 Why SNS with email subscription chosen:
-- CloudWatch can only trigger actions via SNS topic ARN — email is the SNS delivery protocol, not a CloudWatch feature
+- To notify people, CloudWatch alarm actions go through an SNS topic — email is the SNS delivery protocol, not a CloudWatch feature
 - SNS can fan out to multiple subscribers simultaneously (email, SMS, Lambda) — one topic serves all notification channels
 - SNS is highly available and durable
 - Email subscription is free and sufficient for this use case
@@ -344,15 +348,15 @@ Why Terraform Cloud rejected:
 
 Why S3 + DynamoDB chosen:
 - S3 stores state remotely — accessible from any machine or pipeline runner
-- S3 versioning enables rollback to any previous state if an apply goes wrong
+- S3 versioning would enable rollback to a previous state — it was not enabled on the state bucket while this project ran
 - DynamoDB provides atomic locking — only one apply can run at a time
-- Encryption at rest via AES256 — state data protected
+- Encryption at rest: S3 default encryption (SSE-S3) — not set explicitly in the backend configuration
 - Entirely within AWS — no external service dependency
 
 Trade-offs accepted:
 - Bootstrap problem: S3 bucket and DynamoDB table must exist before backend can be configured — requires initial local apply with local state, then migration
 - If S3 bucket or DynamoDB table is accidentally destroyed, all pipeline runs fail until restored
-- State bucket must never be destroyed — protect with lifecycle prevent_destroy
+- State bucket must never be destroyed — protect with lifecycle prevent_destroy (not implemented; the lock table is managed in this project's own state, so terraform destroy removes it)
 
 
 ## Decision: Terraform state locking — DynamoDB over S3 native locking
@@ -366,17 +370,16 @@ Alternatives considered:
 - S3 native locking via use_lockfile = true (Terraform >= 1.10 only)
 
 Why S3 native locking rejected:
-- Requires Terraform >= 1.10 — newer feature with less production history
+- Experimental in Terraform 1.10, the version the pipeline pins
 - Less widely documented and recognised in enterprise environments
 - Would have made the DynamoDB table created earlier redundant
 
 Why DynamoDB locking chosen:
-- Established pattern — every enterprise Terraform S3 backend tutorial uses DynamoDB locking
-- Interviewers will recognise it immediately
+- Established, widely documented pattern at the time
 - DynamoDB table already created as part of Sprint 6 remote state setup
 - PAY_PER_REQUEST billing — lock operations cost fractions of a cent
 
 Trade-offs accepted:
-- Deprecated warning in Terraform >= 1.10 (dynamodb_table parameter)
+- dynamodb_table is deprecated from Terraform 1.11 in favour of use_lockfile — migrate when upgrading
 - Additional resource to manage — DynamoDB table must exist before backend initialises
 - Minor: if DynamoDB table is deleted, terraform init fails until table is recreated

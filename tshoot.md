@@ -113,34 +113,6 @@ Look for `access-control-allow-origin: *` in headers
 
 ---
 
-### Symptom 3: Rate Limit Exceeded (429 Error)
-
-**API returns:** `{"message":"Too Many Requests"}`
-
-**Diagnosis:**
-
-1. Check current usage plan limits:
-```bash
-aws apigateway get-usage-plans --region eu-central-1
-```
-
-2. Check actual usage:
-```bash
-aws apigateway get-usage \
-  --usage-plan-id YOUR_PLAN_ID \
-  --start-date 2026-02-21 \
-  --end-date 2026-02-21 \
-  --region eu-central-1
-```
-
-**Expected behavior:** This is working as designed (cost protection)
-
-**To increase limits temporarily:**
-- Update `quota_settings.limit` in `api_gateway.tf`
-- Run `terraform apply`
-
----
-
 ## Troubleshooting Guide: SES Email Notifications Not Delivered
 
 **Symptom:** Form submission succeeds (200 response) but no email arrives
@@ -364,7 +336,7 @@ Should show `token.actions.githubusercontent.com`
 **Common causes:**
 - `https://github.com/` prefix accidentally included in the sub condition
 - `id-token: write` missing from workflow permissions
-- OIDC provider destroyed and not recreated
+- OIDC provider destroyed and not recreated — in this project, most likely by a pipeline apply of a commit that did not yet include `github_oidc.tf`. The error then reads `No OpenIDConnect provider found in your account`
 
 ---
 
@@ -377,10 +349,11 @@ Should show `token.actions.githubusercontent.com`
 **Fix:**
 ```bash
 cd terraform
-terraform init -reconfigure  # temporarily bypass backend
-terraform apply -target=aws_dynamodb_table.terraform_locks
-terraform init -migrate-state
+# The table that holds locks doesn't exist, so create it without taking a lock
+terraform apply -lock=false -target=aws_dynamodb_table.terraform_locks
 ```
+
+Only use `-lock=false` when nothing else can be running Terraform against this state.
 
 ---
 
@@ -392,7 +365,7 @@ terraform init -migrate-state
 ```bash
 cd terraform
 terraform fmt
-git add -A
+git add terraform/
 git commit -m "Fix: terraform fmt"
 git push
 ```
